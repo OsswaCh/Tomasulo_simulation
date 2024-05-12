@@ -23,6 +23,7 @@ public:
     short excecution_end_cycle;
     short write_back_cycle;
     short cycle_count_per_instruction;
+    short cycles_left;
 
     // intruction type
     enum instruction_type
@@ -45,6 +46,7 @@ public:
         execution_start_cycle = INT_MIN;
         excecution_end_cycle = INT_MIN;
         write_back_cycle = INT_MIN;
+        cycles_left = cycles;
     }
 };
 
@@ -65,6 +67,7 @@ public:
     string Qj, Qk;
     int Vj, Vk;
     int A;
+    int cycles;
 
     // number of reservation stations
     int size;
@@ -81,7 +84,8 @@ public:
                         int A = 0,
                         int Vj = -1,
                         int Vk = -1,
-                        int size = 0) : OP(OP), name(name), busy(busy), Qj(Qj), Qk(Qk), A(A), Vj(Vj), Vk(Vk), size(size) {}
+                        int size = 0,
+                        int cycles) : OP(OP), name(name), busy(busy), Qj(Qj), Qk(Qk), A(A), Vj(Vj), Vk(Vk), size(size), cycles(cycles) {}
 };
 
 /////////////////////////////////////////Hardware input/////////////////////////////////////////
@@ -160,23 +164,125 @@ struct reservation_stations
     {
         for (int i = 0; i < hardware.adders; i++)
         {
-            adders.push_back(reservation_station("ADD", "adder" + to_string(i), false, "", "", 0, -1, -1, hardware.adders));
+            adders.push_back(reservation_station("ADD", "adder" + to_string(i), false, "", "", 0, -1, -1, hardware.adders, hardware.add_cycles));
         }
         for (int i = 0; i < hardware.multipliers; i++)
         {
-            multipliers.push_back(reservation_station("MUL", "multiplier" + to_string(i), false, "", "", 0, -1, -1, hardware.multipliers));
+            multipliers.push_back(reservation_station("MUL", "multiplier" + to_string(i), false, "", "", 0, -1, -1, hardware.multipliers, hardware.mul_cycles));
         }
         for (int i = 0; i < hardware.loaders; i++)
         {
-            loader.push_back(reservation_station("LOAD", "loader" + to_string(i), false, "", "", 0, -1, -1, hardware.loaders));
+            loader.push_back(reservation_station("LOAD", "loader" + to_string(i), false, "", "", 0, -1, -1, hardware.loaders, hardware.laod_cycles));
         }
         for (int i = 0; i < hardware.stores; i++)
         {
-            stores.push_back(reservation_station("STORE", "store" + to_string(i), false, "", "", 0, -1, -1, hardware.stores));
+            stores.push_back(reservation_station("STORE", "store" + to_string(i), false, "", "", 0, -1, -1, hardware.stores, hardware.store_cycles));
         }
         for (int i = 0; i < hardware.nanders; i++)
         {
-            nanders.push_back(reservation_station("NAND", "nander" + to_string(i), false, "", "", 0, -1, -1, hardware.nanders));
+            nanders.push_back(reservation_station("NAND", "nander" + to_string(i), false, "", "", 0, -1, -1, hardware.nanders, hardware.nand_cycles));
         }
     }
+
+    // check if the reservation station is full
+    bool full(string OP)
+    {
+        if (OP == "ADD")
+        {
+            for (int i = 0; i < hardware.adders; i++)
+            {
+                if (!adders[i].busy)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        else if (OP == "MUL")
+        {
+            for (int i = 0; i < hardware.multipliers; i++)
+            {
+                if (!multipliers[i].busy)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        else if (OP == "LOAD")
+        {
+            for (int i = 0; i < hardware.loaders; i++)
+            {
+                if (!loader[i].busy)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        else if (OP == "STORE")
+        {
+            for (int i = 0; i < hardware.stores; i++)
+            {
+                if (!stores[i].busy)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        else if (OP == "NAND")
+        {
+            for (int i = 0; i < hardware.nanders; i++)
+            {
+                if (!nanders[i].busy)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    // check if the reservation station is empty ==> program is done
+    bool program_finished(vector<instruction> instructions)
+    {
+        for (int i = 0; i < instructions.size(); i++)
+        {
+            if (instructions[i].write_back_cycle == INT_MIN)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 };
+
+///////////////////////////////////////// global variables/////////////////////////////////////////
+
+// set of reservation stations
+reservation_stations *res_stations;
+
+// instructions
+vector<instruction> instructions;
+
+/////////////////////////////////////////Tomasulo/////////////////////////////////////////
+
+void reservation_station::execute()
+{
+
+    // add & addi excecution
+    for (int i = 0; i < res_stations->hardware.adders; i++)
+    {
+
+        /*also chech if the instruction begging time is -1*/
+        if (!res_stations->adders[i].busy && res_stations->adders[i].Qj == "" && res_stations->adders[i].Qk == "")
+        {
+            res_stations->adders[i].busy = true;
+            res_stations->adders[i].A = res_stations->adders[i].Vj + res_stations->adders[i].Vk;
+            res_stations->adders[i].cycles = res_stations->hardware.add_cycles;
+            // cycles left --
+            res_stations->adders[i].cycles--;
+        }
+    }
+}
