@@ -1,9 +1,25 @@
+/////////////////////////////general notes/////////////////////////////
+
+// cntl + f note + nadia to find my notes left for you
+// do the same for any notes you leave for me
+// if you need a variable to be changed outside the function you are writing, make sure to write the name of the function and include it in the checklist
+
+/////////////////////////////checklist/////////////////////////////
+/*
+- do the clock
+- create the load and store buffers
+-we may have the cdb as a queue in the run funcition
+- we will be doing the actual calculation of the values in the wb stage
+
+*/
+/////////////////////////////code/////////////////////////////
+
 #include <iostream>
 #include <vector>
 #include <string>
 using namespace std;
 
-typedef pair<string, int> reg_item;
+typedef pair<int, bool> reg_item; // reg value and status
 
 /////////////////////////////////////////other classes/////////////////////////////////////////
 class instruction
@@ -68,12 +84,10 @@ public:
     int Vj, Vk;
     int A;
     int cycles;
+    instruction *inst;
 
     // number of reservation stations
     int size;
-
-    // register status array
-    vector<reg_item> registers;
 
     // contructors
     reservation_station(string OP = "",
@@ -85,7 +99,41 @@ public:
                         int Vj = -1,
                         int Vk = -1,
                         int size = 0,
-                        int cycles) : OP(OP), name(name), busy(busy), Qj(Qj), Qk(Qk), A(A), Vj(Vj), Vk(Vk), size(size), cycles(cycles) {}
+                        int cycles,
+                        instruction *inst) : OP(OP), name(name), busy(busy), Qj(Qj), Qk(Qk), A(A), Vj(Vj), Vk(Vk), size(size), cycles(cycles), inst(inst) {}
+};
+
+class registers
+{
+public:
+    // register status array
+    vector<pair<int, bool>> register_station;
+
+    // constructor
+    registers(int size)
+    {
+        register_station.resize(size, make_pair(0, false));
+    }
+
+    // returns the status of the register
+    bool is_busy(int reg)
+    {
+        if (reg < 0 || reg >= register_station.size())
+        {
+            return false;
+        }
+        return register_station[reg].second;
+    }
+
+    // set the register value to false once the value is written to the register
+    void written_to(int reg)
+    {
+        if (reg < 0 || reg >= register_station.size())
+        {
+            return;
+        }
+        register_station[reg].second = false;
+    }
 };
 
 /////////////////////////////////////////Hardware input/////////////////////////////////////////
@@ -102,8 +150,8 @@ struct hardware_input
     int call_ret = 1;
 
     // default number of cycles
-    int laod_cycles = 6;  // 2 for address calculation, 4 for memory access
-    int store_cycles = 6; // 2 for address calculation, 4 for memory access
+    int laod_cycles = 6;
+    int store_cycles = 6;
     int branch_cycles = 1;
     int call_ret_cycles = 1;
     int add_cycles = 2;
@@ -266,7 +314,18 @@ reservation_stations *res_stations;
 // instructions
 vector<instruction> instructions;
 
+// clock related variables
+int clk = 0; // to be increased in a for loop in the run function
+int current_cycle = 0;
+
 /////////////////////////////////////////Tomasulo/////////////////////////////////////////
+
+/////////////////////////////////////////issuing/////////////////////////////////////////
+
+/*Note to nadia*/
+// i am going to assume that in issuing i am going to have the the instruction be in the reservatoin satatio
+// also fill in the gj and the other values needed in the reservation sation that are retrieved from the instruction
+// you should also update the instuction issue status date to be current cycle
 
 void reservation_station::execute()
 {
@@ -275,14 +334,135 @@ void reservation_station::execute()
     for (int i = 0; i < res_stations->hardware.adders; i++)
     {
 
-        /*also chech if the instruction begging time is -1*/
-        if (!res_stations->adders[i].busy && res_stations->adders[i].Qj == "" && res_stations->adders[i].Qk == "")
+        // case wher the execution is not started yet
+        if (res_stations->adders[i].inst->execution_start_cycle == INT_MIN)
         {
-            res_stations->adders[i].busy = true;
-            res_stations->adders[i].A = res_stations->adders[i].Vj + res_stations->adders[i].Vk;
-            res_stations->adders[i].cycles = res_stations->hardware.add_cycles;
-            // cycles left --
-            res_stations->adders[i].cycles--;
+            // check if the reservation station is ready
+            if (res_stations->adders[i].ready())
+            {
+                // update the reservation station
+                res_stations->adders[i].inst->execution_start_cycle = current_cycle;
+                res_stations->adders[i].inst->cycles_left = res_stations->adders[i].cycles;
+            }
         }
+
+        /*note osswa check if it should be written back at 1 or 0
+         */
+        // mark the end of the execution
+        if (res_stations->adders[i].inst->cycles_left == 0)
+        {
+            res_stations->adders[i].inst->excecution_end_cycle = current_cycle;
+        }
+
+        // decrement the cycles left
+        res_stations->adders[i].inst->cycles_left--;
+    }
+
+    // mul excecution
+    for (int i = 0; i < res_stations->hardware.multipliers; i++)
+    {
+        // case wher the execution is not started yet
+        if (res_stations->multipliers[i].inst->execution_start_cycle == INT_MIN)
+        {
+            // check if the reservation station is ready
+            if (res_stations->multipliers[i].ready())
+            {
+                // update the reservation station
+                res_stations->multipliers[i].inst->execution_start_cycle = current_cycle;
+                res_stations->multipliers[i].inst->cycles_left = res_stations->multipliers[i].cycles;
+            }
+        }
+
+        /*note osswa check if it should be written back at 1 or 0
+         */
+        // mark the end of the execution
+        if (res_stations->multipliers[i].inst->cycles_left == 0)
+        {
+            res_stations->multipliers[i].inst->excecution_end_cycle = current_cycle;
+        }
+
+        // decrement the cycles left
+        res_stations->multipliers[i].inst->cycles_left--;
+    }
+
+    // nand excecution
+    for (int i = 0; i < res_stations->hardware.nanders; i++)
+    {
+        // case wher the execution is not started yet
+        if (res_stations->nanders[i].inst->execution_start_cycle == INT_MIN)
+        {
+            // check if the reservation station is ready
+            if (res_stations->nanders[i].ready())
+            {
+                // update the reservation station
+                res_stations->nanders[i].inst->execution_start_cycle = current_cycle;
+                res_stations->nanders[i].inst->cycles_left = res_stations->nanders[i].cycles;
+            }
+        }
+
+        /*note osswa check if it should be written back at 1 or 0
+         */
+        // mark the end of the execution
+        if (res_stations->nanders[i].inst->cycles_left == 0)
+        {
+            res_stations->nanders[i].inst->excecution_end_cycle = current_cycle;
+        }
+
+        // decrement the cycles left
+        res_stations->nanders[i].inst->cycles_left--;
+    }
+
+    // load excecution
+    for (int i = 0; i < res_stations->hardware.loaders; i++)
+    {
+        // case wher the execution is not started yet
+        if (res_stations->loader[i].inst->execution_start_cycle == INT_MIN)
+        {
+            // check if the reservation station is ready
+            if (res_stations->loader[i].ready())
+            {
+                // update the reservation station
+                res_stations->loader[i].inst->execution_start_cycle = current_cycle;
+                res_stations->loader[i].inst->cycles_left = res_stations->loader[i].cycles;
+            }
+        }
+
+        /*note osswa check if it should be written back at 1 or 0
+         */
+        // mark the end of the execution
+        if (res_stations->loader[i].inst->cycles_left == 0)
+        {
+            res_stations->loader[i].inst->excecution_end_cycle = current_cycle;
+        }
+
+        // decrement the cycles left
+        res_stations->loader[i].inst->cycles_left--;
+    }
+
+    // store excecution
+    for (int i = 0; i < res_stations->hardware.stores; i++)
+    {
+        // case wher the execution is not started yet
+        if (res_stations->stores[i].inst->execution_start_cycle == INT_MIN)
+        {
+            // check if the reservation station is ready
+            if (res_stations->stores[i].ready())
+            {
+                // update the reservation station
+                res_stations->stores[i].inst->execution_start_cycle = current_cycle;
+                res_stations->stores[i].inst->cycles_left = res_stations->stores[i].cycles;
+            }
+        }
+
+        /*note osswa check if it should be written back at 1 or 0
+         */
+        // mark the end of the execution
+        if (res_stations->stores[i].inst->cycles_left == 0)
+        {
+            res_stations->stores[i].inst->excecution_end_cycle = current_cycle;
+        }
+
+        // decrement the cycles left
+        res_stations->stores[i].inst->cycles_left--;
     }
 }
