@@ -4,6 +4,7 @@
 // do the same for any notes you leave for me
 // if you need a variable to be changed outside the function you are writing, make sure to write the name of the function and include it in the checklist
 
+//- i made PC a global variable and removed it from the instruction class
 /////////////////////////////checklist/////////////////////////////
 /*
 - do the clock
@@ -12,6 +13,10 @@
 - we will be doing the actual calculation of the values in the wb stage
 - I have no idea how to do the call and ret in the execution stage but i think it require both jal and store
 - the branching is also not handeled in the execution stage, it is treated as a normal add/sub operation
+- for now i am going to put the branching function in the reservation_station class, we might change that later
+- i added a after_branch varaible in the instruction class to know if the instruction comes after a branch or not --> set during ussuing (append the instruction to the after_branch vector)
+- check if the afterbranch vector is made of instrucitons or reservation stations
+-make PC increment in the run function (check the icrement if it should be +1 or no in branch )
 
 */
 /////////////////////////////code/////////////////////////////
@@ -29,7 +34,7 @@ class instruction
 
 public:
     // instruction components
-    int PC;
+
     int rs1;
     int rs2;
     int rd;
@@ -42,6 +47,9 @@ public:
     short write_back_cycle;
     short cycle_count_per_instruction;
     short cycles_left;
+
+    // after branch
+    bool after_branch = false;
 
     // intruction type
     enum instruction_type
@@ -58,7 +66,7 @@ public:
     };
 
     // constructor
-    instruction(int PC = 0, string operation = "", int rs1 = 0, int rs2 = 0, int rd = 0, int imm = 0, short cycles = 0) : PC(PC), rs1(rs1), rs2(rs2), rd(rd), imm(imm), cycle_count_per_instruction(cycles)
+    instruction(string operation = "", int rs1 = 0, int rs2 = 0, int rd = 0, int imm = 0, short cycles = 0, bool after_branch) : rs1(rs1), rs2(rs2), rd(rd), imm(imm), cycle_count_per_instruction(cycles), after_branch(after_branch)
     {
         issue_cycle = INT_MIN;
         execution_start_cycle = INT_MIN;
@@ -77,6 +85,9 @@ public:
     void execute();
     void write_back();
     void flush();
+    void branch();
+    void no_branch();
+    void call_ret();
 
     // components of reservation station
     string OP;
@@ -310,14 +321,20 @@ struct reservation_stations
 
 ///////////////////////////////////////// global variables/////////////////////////////////////////
 
+// pc
+int PC = 0;
+
 // set of reservation stations
 reservation_stations *res_stations;
 
 // instructions
 vector<instruction> instructions;
 
+// after branch vector: keeps track of the instructions that come after a branch
+vector<reservation_station> after_branch_record;
+
 // clock related variables
-int clk = 0; // to be increased in a for loop in the run function
+int clk = 0;
 int current_cycle = 0;
 
 /////////////////////////////////////////Tomasulo/////////////////////////////////////////
@@ -485,4 +502,24 @@ void reservation_station::flush()
     Vk = -1;
     A = 0;
     inst = nullptr;
+}
+
+/////////////////////////////////////////branching/////////////////////////////////////////
+
+void reservation_station::branch()
+{
+
+    for (int i = 0; i < after_branch_record.size(); i++)
+    {
+        if (after_branch_record[i].inst->after_branch)
+        {
+            // flush the reservation station
+            after_branch_record[i].flush();
+        }
+    }
+    // empty the after branch record
+    after_branch_record.clear();
+
+    // set PC to the new value
+    PC = PC + A + 1;
 }
