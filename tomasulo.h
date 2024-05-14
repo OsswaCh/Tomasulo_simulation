@@ -10,6 +10,8 @@
 - create the load and store buffers
 -we may have the cdb as a queue in the run funcition
 - we will be doing the actual calculation of the values in the wb stage
+- I have no idea how to do the call and ret in the execution stage but i think it require both jal and store
+- the branching is also not handeled in the execution stage, it is treated as a normal add/sub operation
 
 */
 /////////////////////////////code/////////////////////////////
@@ -322,10 +324,11 @@ int current_cycle = 0;
 
 /////////////////////////////////////////issuing/////////////////////////////////////////
 
-/*Note to nadia*/
+/*Note nadia*/
 // i am going to assume that in issuing i am going to have the the instruction be in the reservatoin satatio
 // also fill in the gj and the other values needed in the reservation sation that are retrieved from the instruction
 // you should also update the instuction issue status date to be current cycle
+// make sure in the issuing to send the jal and beq to the add reservation station and have a variable or sth to know that it is a branch
 
 void reservation_station::execute()
 {
@@ -348,6 +351,7 @@ void reservation_station::execute()
 
         /*note osswa check if it should be written back at 1 or 0
          */
+
         // mark the end of the execution
         if (res_stations->adders[i].inst->cycles_left == 0)
         {
@@ -465,4 +469,20 @@ void reservation_station::execute()
         // decrement the cycles left
         res_stations->stores[i].inst->cycles_left--;
     }
+}
+
+/////////////////////////////////////////flushing/////////////////////////////////////////
+
+void reservation_station::flush()
+{
+
+    OP = "";
+    name = "";
+    busy = false;
+    Qj = "";
+    Qk = "";
+    Vj = -1;
+    Vk = -1;
+    A = 0;
+    inst = nullptr;
 }
