@@ -4,7 +4,7 @@
 // do the same for any notes you leave for me
 // if you need a variable to be changed outside the function you are writing, make sure to write the name of the function and include it in the checklist
 
-//- i made PC a global variable and removed it from the instruction class
+//- i made PC a global variable and removed it from the instruction class // i moved them to global.h and global.cpp
 /////////////////////////////checklist/////////////////////////////
 /*
 - do the clock
@@ -21,14 +21,12 @@
 */
 /////////////////////////////code/////////////////////////////
 
-#include <iostream>
-#include <vector>
-#include <string>
-using namespace std;
+#pragma once 
+#include "includes.h";
 
-typedef pair<int, bool> reg_item; // reg value and status
 
 /////////////////////////////////////////other classes/////////////////////////////////////////
+//first step
 class instruction
 {
 
@@ -47,6 +45,7 @@ public:
     short write_back_cycle;
     short cycle_count_per_instruction;
     short cycles_left;
+    short instruction_status; 
 
     // after branch
     bool after_branch = false;
@@ -75,6 +74,7 @@ public:
         cycles_left = cycles;
     }
 };
+
 
 class reservation_station
 {
@@ -320,29 +320,29 @@ struct reservation_stations
 };
 
 ///////////////////////////////////////// global variables/////////////////////////////////////////
-
+ // note osswa: moved to global files 
 // pc
-int PC = 0;
+// int PC = 0;
 
-// set of reservation stations
-reservation_stations *res_stations;
+// // set of reservation stations
+// reservation_stations *res_stations;
 
-// instructions
-vector<instruction> instructions;
+// // instructions
+// vector<instruction> instructions;
 
-// after branch vector: keeps track of the instructions that come after a branch
-vector<reservation_station> after_branch_record;
+// // after branch vector: keeps track of the instructions that come after a branch
+// vector<reservation_station> after_branch_record;
 
-// clock related variables
-int clk = 0;
-int current_cycle = 0;
+// // clock related variables
+// int clk = 0;
+// int current_cycle = 0;
 
 /////////////////////////////////////////Tomasulo/////////////////////////////////////////
 
 /////////////////////////////////////////issuing/////////////////////////////////////////
 
 /*Note nadia*/
-// i am going to assume that in issuing i am going to have the the instruction be in the reservatoin satatio
+// i am going to assume that in issuing i am going to have the the instruction be in the reservatoin satation
 // also fill in the gj and the other values needed in the reservation sation that are retrieved from the instruction
 // you should also update the instuction issue status date to be current cycle
 // make sure in the issuing to send the jal and beq to the add reservation station and have a variable or sth to know that it is a branch
@@ -523,3 +523,5 @@ void reservation_station::branch()
     // set PC to the new value
     PC = PC + A + 1;
 }
+
+
