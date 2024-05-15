@@ -5,15 +5,15 @@
 // if you need a variable to be changed outside the function you are writing, make sure to write the name of the function and include it in the checklist
 
 //- i made PC a global variable and removed it from the instruction class // i moved them to global.h and global.cpp
+// call and ret are handeled as an addition in the execution stage
 
 // we might not need the buffers?
 /////////////////////////////checklist/////////////////////////////
 /*
 - do the clock
 - create the load and store buffers
--we may have the cdb as a queue in the run funcition
+- we may have the cdb as a queue in the run funcition
 - we will be doing the actual calculation of the values in the wb stage
-- I have no idea how to do the call and ret in the execution stage but i think it require both jal and store
 - the branching is also not handeled in the execution stage, it is treated as a normal add/sub operation
 - for now i am going to put the branching function in the reservation_station class, we might change that later
 - i added a after_branch varaible in the instruction class to know if the instruction comes after a branch or not --> set during ussuing (append the instruction to the after_branch vector)
@@ -22,7 +22,7 @@
 - no branch?
 - for the load and store make sure if the address should be calculated in the wb or in the buffer (we might not need a buffer)
 - make the ready function in the reservation station class
-
+- check the call ret wb functionality
 
 */
 /////////////////////////////code/////////////////////////////
@@ -128,20 +128,20 @@ public:
     }
 };
 
-class registers
+class Registers
 {
 public:
     // register status array
     vector<pair<int, bool>> register_station;
 
     // constructor
-    registers(int size)
+    Registers(int size)
     {
         register_station.resize(size, make_pair(0, false));
     }
 
     // destructor
-    ~registers()
+    ~Registers()
     {
         register_station.clear();
     }
@@ -708,6 +708,44 @@ void reservation_station::write_back()
             res_stations->stores[i].flush();
         }
     }
+
+    // call & ret write back
+    for (int i = 0; i < res_stations->hardware.call_ret; i++)
+    {
+        // check if the reservation station is ready
+        if (res_stations->call_ret[i].ready())
+        {
+            // check if call or ret; if call calculate the new pc if ret return to the value stored in r1 in the register file
+            if (res_stations->call_ret[i].inst->OP == "CALL")
+            {
+                // update the cycles
+                res_stations->call_ret[i].inst->write_back_cycle = current_cycle;
+
+                // update the rd
+                res_stations->call_ret[i].inst->rd = PC + 1;
+
+                // push the finished instruction to the finished instructions vector
+                finished_instructions.push_back(*res_stations->call_ret[i].inst);
+
+                // flush the instruction
+                res_stations->call_ret[i].flush();
+            }
+            else if (res_stations->call_ret[i].inst->OP == "RET")
+            {
+                // update the cycles
+                res_stations->call_ret[i].inst->write_back_cycle = current_cycle;
+
+                // update the rd
+                res_stations->call_ret[i].inst->rd = registers[1].first;
+
+                // push the finished instruction to the finished instructions vector
+                finished_instructions.push_back(*res_stations->call_ret[i].inst);
+
+                // flush the instruction
+                res_stations->call_ret[i].flush();
+            }
+        }
+    }
 }
 
 /////////////////////////////////////////branching/////////////////////////////////////////
@@ -733,10 +771,9 @@ void reservation_station::branch()
 /////////////////////////////////////////no branch/////////////////////////////////////////
 // we might beed this
 
-
 /////////////////////////////////////////ready function/////////////////////////////////////////
 
-//this function checks if the instructions is ready to be pushed back of not 
+// this function checks if the instructions is ready to be pushed back of not
 /*note osswa : might need some tweaking for the laod and store write */
 
 bool reservation_station::ready()
@@ -755,4 +792,3 @@ bool reservation_station::ready()
 
     return false;
 }
-

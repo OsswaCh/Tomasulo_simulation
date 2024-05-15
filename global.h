@@ -10,6 +10,7 @@ extern reservation_stations *res_stations;
 extern vector<instruction> instructions;
 extern vector<instruction> finished_instructions;
 extern vector<reservation_station> after_branch_record;
+extern vector<reg_item> registers;
 
 typedef pair<int, bool> reg_item; // reg value and status
 
