@@ -525,3 +525,53 @@ void reservation_station::branch()
 }
 
 
+/// Buffers
+// struct LoadStoreBuffer
+// {
+// 	string name;
+// 	string address;
+// 	bool isBusy;
+// 	LoadStoreBuffer()
+// 	{
+// 		name = "";
+// 		isBusy = false;
+// 		address = "";
+// 		instruction = nullptr;
+// 		fu = "";
+// 	}
+
+// 	string fu;
+// 	instruction* instruction;
+// };
+
+// struct LoadStoreBufferType
+// {
+// 	static string const LOAD;
+// 	static string const STORE;
+// };
+
+//  string const LoadStoreBufferType::LOAD = "LOAD";
+//  string const LoadStoreBufferType::STORE = "STORE";
+
+// //why isnt it working when i move it to global? 
+
+// LoadStoreBuffer* Load_ReservationStations;
+// LoadStoreBuffer* Store_ReservationStations;
+
+// this->Load_ReservationStations = new LoadStoreBuffer[this->totalLoad_ReservationStations];
+
+// for (int i = 0; i < totalLoad_ReservationStations; i++)
+// {
+//     char num[10];
+//     _itoa_s(i, num, 10);
+//     this->Load_ReservationStations[i].name = "LOAD" + std::to_string(i);
+// }
+
+// this->Store_ReservationStations = new LoadStoreBuffer[this->totalStore_ReservationStations];
+
+// for (int i = 0; i < totalStore_ReservationStations; i++)
+// {
+//     char num[10];
+//     _itoa_s(i, num, 10);
+//     this->Store_ReservationStations[i].name = "STORE" + std::to_string(i);
+// }

@@ -13,16 +13,9 @@ extern vector<reservation_station> after_branch_record;
 
 typedef pair<int, bool> reg_item; // reg value and status
 
-struct LoadBufferEntry 
-{
-    int address;
-    bool ready;
-    int result;
-};
 
-struct StoreBufferEntry
+struct LoadStoreBufferType
 {
-    int address;
-    int data;
-    bool committed;
+	static string const LOAD;
+	static string const STORE;
 };
