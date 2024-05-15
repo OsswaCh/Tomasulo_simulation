@@ -5,6 +5,8 @@
 // if you need a variable to be changed outside the function you are writing, make sure to write the name of the function and include it in the checklist
 
 //- i made PC a global variable and removed it from the instruction class // i moved them to global.h and global.cpp
+
+// we might not need the buffers?
 /////////////////////////////checklist/////////////////////////////
 /*
 - do the clock
@@ -16,17 +18,20 @@
 - for now i am going to put the branching function in the reservation_station class, we might change that later
 - i added a after_branch varaible in the instruction class to know if the instruction comes after a branch or not --> set during ussuing (append the instruction to the after_branch vector)
 - check if the afterbranch vector is made of instrucitons or reservation stations
--make PC increment in the run function (check the icrement if it should be +1 or no in branch )
+- make PC increment in the run function (check the icrement if it should be +1 or no in branch )
+- no branch?
+- for the load and store make sure if the address should be calculated in the wb or in the buffer (we might not need a buffer)
+- make the ready function in the reservation station class
+
 
 */
 /////////////////////////////code/////////////////////////////
 
-#pragma once 
+#pragma once
 #include "includes.h";
 
-
 /////////////////////////////////////////other classes/////////////////////////////////////////
-//first step
+// first step
 class instruction
 {
 
@@ -45,7 +50,7 @@ public:
     short write_back_cycle;
     short cycle_count_per_instruction;
     short cycles_left;
-    short instruction_status; 
+    short instruction_status;
 
     // after branch
     bool after_branch = false;
@@ -73,8 +78,9 @@ public:
         write_back_cycle = INT_MIN;
         cycles_left = cycles;
     }
+    // destructor
+    ~instruction() {}
 };
-
 
 class reservation_station
 {
@@ -114,6 +120,12 @@ public:
                         int size = 0,
                         int cycles,
                         instruction *inst) : OP(OP), name(name), busy(busy), Qj(Qj), Qk(Qk), A(A), Vj(Vj), Vk(Vk), size(size), cycles(cycles), inst(inst) {}
+
+    // destructor
+    ~reservation_station()
+    {
+        inst = nullptr;
+    }
 };
 
 class registers
@@ -126,6 +138,12 @@ public:
     registers(int size)
     {
         register_station.resize(size, make_pair(0, false));
+    }
+
+    // destructor
+    ~registers()
+    {
+        register_station.clear();
     }
 
     // returns the status of the register
@@ -317,29 +335,77 @@ struct reservation_stations
         }
         return true;
     }
+
+    // destructors
+    ~reservation_stations()
+    {
+        adders.clear();
+        multipliers.clear();
+        loader.clear();
+        stores.clear();
+        nanders.clear();
+    }
 };
 
-///////////////////////////////////////// global variables/////////////////////////////////////////
- // note osswa: moved to global files 
-// pc
-// int PC = 0;
+/////////////////////////////////////////load store buffers/////////////////////////////////////////
 
-// // set of reservation stations
-// reservation_stations *res_stations;
+// Buffers
+struct LoadStoreBuffer
+{
+    string name;
+    string address;
+    bool isBusy;
+    instruction *instr;
+    string fu;
 
-// // instructions
-// vector<instruction> instructions;
+    LoadStoreBuffer() : isBusy(false), instr(nullptr) {} // Constructor
+};
 
-// // after branch vector: keeps track of the instructions that come after a branch
-// vector<reservation_station> after_branch_record;
+struct LoadStoreBufferType
+{
+    static const string LOAD;
+    static const string STORE;
+};
 
-// // clock related variables
-// int clk = 0;
-// int current_cycle = 0;
+const string LoadStoreBufferType::LOAD = "LOAD";
+const string LoadStoreBufferType::STORE = "STORE";
+
+class buffers
+{
+private:
+    LoadStoreBuffer *Load_ReservationStations;
+    LoadStoreBuffer *Store_ReservationStations;
+    int totalLoad_ReservationStations;
+    int totalStore_ReservationStations;
+
+public:
+    buffers(int loadStations, int storeStations)
+        : totalLoad_ReservationStations(loadStations),
+          totalStore_ReservationStations(storeStations)
+    {
+        Load_ReservationStations = new LoadStoreBuffer[totalLoad_ReservationStations];
+        for (int i = 0; i < totalLoad_ReservationStations; i++)
+        {
+            Load_ReservationStations[i].name = "LOAD" + to_string(i);
+        }
+
+        Store_ReservationStations = new LoadStoreBuffer[totalStore_ReservationStations];
+        for (int i = 0; i < totalStore_ReservationStations; i++)
+        {
+            Store_ReservationStations[i].name = "STORE" + to_string(i);
+        }
+    }
+
+    ~buffers()
+    {
+        delete[] Load_ReservationStations;
+        delete[] Store_ReservationStations;
+    }
+};
 
 /////////////////////////////////////////Tomasulo/////////////////////////////////////////
 
-/////////////////////////////////////////issuing/////////////////////////////////////////
+/////////////////////////////////////////execution/////////////////////////////////////////
 
 /*Note nadia*/
 // i am going to assume that in issuing i am going to have the the instruction be in the reservatoin satation
@@ -504,6 +570,146 @@ void reservation_station::flush()
     inst = nullptr;
 }
 
+/////////////////////////////////////////write back/////////////////////////////////////////
+
+void reservation_station::write_back()
+{
+
+    // add & addi write back
+    for (int i = 0; i < res_stations->hardware.adders; i++)
+    {
+        // check if the reservation station is ready
+        if (res_stations->adders[i].ready())
+        {
+            // update the cycles
+            res_stations->adders[i].inst->write_back_cycle = current_cycle;
+
+            // check if addi or add
+            if (res_stations->adders[i].inst->OP == "ADD")
+            {
+                res_stations->adders[i].inst->rd = res_stations->adders[i].inst->rs1 + res_stations->adders[i].inst->rs2;
+            }
+            else if (res_stations->adders[i].inst->OP == "ADDI")
+            {
+                res_stations->adders[i].inst->rd = res_stations->adders[i].inst->rs1 + res_stations->adders[i].inst->imm;
+            }
+
+            // push the finished instruction to the finished instructions vector
+            finished_instructions.push_back(*res_stations->adders[i].inst);
+
+            // flush the instruction
+            res_stations->adders[i].flush();
+        }
+    }
+
+    // mul write back
+    for (int i = 0; i < res_stations->hardware.multipliers; i++)
+    {
+        // check if the reservation station is ready
+        if (res_stations->multipliers[i].ready())
+        {
+            // update the cycles
+            res_stations->multipliers[i].inst->write_back_cycle = current_cycle;
+
+            // update the rd
+            res_stations->multipliers[i].inst->rd = res_stations->multipliers[i].inst->rs1 * res_stations->multipliers[i].inst->rs2;
+
+            // push the finished instruction to the finished instructions vector
+            finished_instructions.push_back(*res_stations->multipliers[i].inst);
+
+            // flush the instruction
+            res_stations->multipliers[i].flush();
+        }
+    }
+
+    // nand write back
+    for (int i = 0; i < res_stations->hardware.nanders; i++)
+    {
+        // check if the reservation station is ready
+        if (res_stations->nanders[i].ready())
+        {
+            // update the cycles
+            res_stations->nanders[i].inst->write_back_cycle = current_cycle;
+
+            // update the rd
+            res_stations->nanders[i].inst->rd = ~(res_stations->nanders[i].inst->rs1 & res_stations->nanders[i].inst->rs2);
+
+            // push the finished instruction to the finished instructions vector
+            finished_instructions.push_back(*res_stations->nanders[i].inst);
+
+            // flush the instruction
+            res_stations->nanders[i].flush();
+        }
+    }
+
+    // branch write back
+
+    for (int i = 0; i < res_stations->hardware.branches; i++)
+    {
+        // check if the reservation station is ready
+        if (res_stations->branches[i].ready())
+        {
+            // update the cycles
+            res_stations->branches[i].inst->write_back_cycle = current_cycle;
+
+            // update the rd only if the condition is true & call the branch function
+            if (res_stations->branches[i].inst->rs1 == res_stations->branches[i].inst->rs2)
+            {
+                branch();
+                branch_misprediction_count++; // increment the branch misprediction count since we have a no branch predictor
+            }
+
+            // push the finished instruction to the finished instructions vector
+            finished_instructions.push_back(*res_stations->branches[i].inst);
+
+            total_branch_count++;
+
+            // flush the instruction
+            res_stations->branches[i].flush();
+        }
+    }
+
+    // load write back
+    for (int i = 0; i < res_stations->hardware.loaders; i++)
+    {
+        // check if the reservation station is ready
+        if (res_stations->loader[i].ready())
+        {
+            // update the cycles
+            res_stations->loader[i].inst->write_back_cycle = current_cycle;
+
+            // note osswa : we might change this
+            res_stations->loader[i].inst->rd = res_stations->loader[i].inst->rs1 + res_stations->loader[i].inst->imm;
+
+            // push the finished instruction to the finished instructions vector
+            finished_instructions.push_back(*res_stations->loader[i].inst);
+
+            // flush the instruction
+            res_stations->loader[i].flush();
+        }
+    }
+
+    // store write back
+    for (int i = 0; i < res_stations->hardware.stores; i++)
+    {
+        // check if the reservation station is ready
+        if (res_stations->stores[i].ready())
+        {
+            // update the cycles
+            res_stations->stores[i].inst->write_back_cycle = current_cycle;
+
+            // note osswa : we might change this
+            res_stations->stores[i].inst->rd = res_stations->stores[i].inst->rs1 + res_stations->stores[i].inst->imm;
+
+            // push the finished instruction to the finished instructions vector
+            finished_instructions.push_back(*res_stations->stores[i].inst);
+
+            // flush the instruction
+            res_stations->stores[i].flush();
+        }
+    }
+}
+
 /////////////////////////////////////////branching/////////////////////////////////////////
 
 void reservation_station::branch()
@@ -524,52 +730,29 @@ void reservation_station::branch()
     PC = PC + A + 1;
 }
 
+/////////////////////////////////////////no branch/////////////////////////////////////////
+// we might beed this
 
-//Buffers
-struct LoadStoreBuffer
+
+/////////////////////////////////////////ready function/////////////////////////////////////////
+
+//this function checks if the instructions is ready to be pushed back of not 
+/*note osswa : might need some tweaking for the laod and store write */
+
+bool reservation_station::ready()
 {
-    string name;
-    string address;
-    bool isBusy;
-    instruction* instr; 
-    string fu;
-
-    LoadStoreBuffer() : isBusy(false), instr(nullptr) {} // Constructor
-};
-
-struct LoadStoreBufferType
-{
-    static const string LOAD;
-    static const string STORE;
-};
-
-const string LoadStoreBufferType::LOAD = "LOAD";
-const string LoadStoreBufferType::STORE = "STORE";
-
-class ReservationStation {
-private:
-    LoadStoreBuffer* Load_ReservationStations;
-    LoadStoreBuffer* Store_ReservationStations;
-    int totalLoad_ReservationStations;
-    int totalStore_ReservationStations;
-
-public:
-    ReservationStation(int loadStations, int storeStations) 
-        : totalLoad_ReservationStations(loadStations), 
-          totalStore_ReservationStations(storeStations) {
-        Load_ReservationStations = new LoadStoreBuffer[totalLoad_ReservationStations];
-        for (int i = 0; i < totalLoad_ReservationStations; i++) {
-            Load_ReservationStations[i].name = "LOAD" + to_string(i);
-        }
-
-        Store_ReservationStations = new LoadStoreBuffer[totalStore_ReservationStations];
-        for (int i = 0; i < totalStore_ReservationStations; i++) {
-            Store_ReservationStations[i].name = "STORE" + to_string(i);
-        }
+    // check if the reservation station is busy
+    if (busy)
+    {
+        return false;
     }
 
-    ~ReservationStation() {
-        delete[] Load_ReservationStations;
-        delete[] Store_ReservationStations;
+    // check if the reservation station is ready
+    if (Qj == "" && Qk == "")
+    {
+        return true;
     }
-};
+
+    return false;
+}
+
