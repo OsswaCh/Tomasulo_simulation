@@ -525,53 +525,51 @@ void reservation_station::branch()
 }
 
 
-/// Buffers
-// struct LoadStoreBuffer
-// {
-// 	string name;
-// 	string address;
-// 	bool isBusy;
-// 	LoadStoreBuffer()
-// 	{
-// 		name = "";
-// 		isBusy = false;
-// 		address = "";
-// 		instruction = nullptr;
-// 		fu = "";
-// 	}
+//Buffers
+struct LoadStoreBuffer
+{
+    string name;
+    string address;
+    bool isBusy;
+    instruction* instr; 
+    string fu;
 
-// 	string fu;
-// 	instruction* instruction;
-// };
+    LoadStoreBuffer() : isBusy(false), instr(nullptr) {} // Constructor
+};
 
-// struct LoadStoreBufferType
-// {
-// 	static string const LOAD;
-// 	static string const STORE;
-// };
+struct LoadStoreBufferType
+{
+    static const string LOAD;
+    static const string STORE;
+};
 
-//  string const LoadStoreBufferType::LOAD = "LOAD";
-//  string const LoadStoreBufferType::STORE = "STORE";
+const string LoadStoreBufferType::LOAD = "LOAD";
+const string LoadStoreBufferType::STORE = "STORE";
 
-// //why isnt it working when i move it to global? 
+class ReservationStation {
+private:
+    LoadStoreBuffer* Load_ReservationStations;
+    LoadStoreBuffer* Store_ReservationStations;
+    int totalLoad_ReservationStations;
+    int totalStore_ReservationStations;
 
-// LoadStoreBuffer* Load_ReservationStations;
-// LoadStoreBuffer* Store_ReservationStations;
+public:
+    ReservationStation(int loadStations, int storeStations) 
+        : totalLoad_ReservationStations(loadStations), 
+          totalStore_ReservationStations(storeStations) {
+        Load_ReservationStations = new LoadStoreBuffer[totalLoad_ReservationStations];
+        for (int i = 0; i < totalLoad_ReservationStations; i++) {
+            Load_ReservationStations[i].name = "LOAD" + to_string(i);
+        }
 
-// this->Load_ReservationStations = new LoadStoreBuffer[this->totalLoad_ReservationStations];
+        Store_ReservationStations = new LoadStoreBuffer[totalStore_ReservationStations];
+        for (int i = 0; i < totalStore_ReservationStations; i++) {
+            Store_ReservationStations[i].name = "STORE" + to_string(i);
+        }
+    }
 
-// for (int i = 0; i < totalLoad_ReservationStations; i++)
-// {
-//     char num[10];
-//     _itoa_s(i, num, 10);
-//     this->Load_ReservationStations[i].name = "LOAD" + std::to_string(i);
-// }
-
-// this->Store_ReservationStations = new LoadStoreBuffer[this->totalStore_ReservationStations];
-
-// for (int i = 0; i < totalStore_ReservationStations; i++)
-// {
-//     char num[10];
-//     _itoa_s(i, num, 10);
-//     this->Store_ReservationStations[i].name = "STORE" + std::to_string(i);
-// }
+    ~ReservationStation() {
+        delete[] Load_ReservationStations;
+        delete[] Store_ReservationStations;
+    }
+};
