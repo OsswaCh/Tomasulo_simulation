@@ -16,8 +16,8 @@ void parseRInstruction(instruction &temp, std::string line)
 void parseIInstruction(instruction &temp, std::string line)
 {
 
-    int rs2 = stoi(line.substr(0, line.find(',')));
-    temp.rs2 = rs2;
+    int rd = stoi(line.substr(0, line.find(',')));
+    temp.rd = rd;
     line.erase(0, line.find(',') + 3);
     int rs1 = stoi(line.substr(0, line.find(',')));
     temp.rs1 = rs1;
@@ -55,7 +55,7 @@ void parseLoadInstruction(instruction &temp, std::string line)
 // STORE
 void parseStoreInstruction(instruction &temp, std::string line)
 {
-    temp.rs2 = stoi(line.substr(0, line.find(',')));
+    temp.rd = stoi(line.substr(0, line.find(',')));
     line.erase(0, line.find(',') + 1);
     temp.imm = stoi(line.substr(0, line.find('(')));
     line.erase(0, line.find('(') + 2);
@@ -69,7 +69,7 @@ void parseCallInstruction(instruction &temp, std::string line)
 
 void readInstructions(std::string filename, std::vector<instruction> &instructions)
 {
-    cout<<"FILE NAME: "<<filename<<endl;
+    cout << "FILE NAME: " << filename << endl;
     std::ifstream file(filename);
     std::string line;
 
@@ -83,6 +83,7 @@ void readInstructions(std::string filename, std::vector<instruction> &instructio
 
     while (getline(file, line))
     {
+        std::cout << line << std::endl;
         instruction temp;
         string inst_name = line.substr(0, line.find(' '));
 
@@ -109,31 +110,42 @@ void readInstructions(std::string filename, std::vector<instruction> &instructio
                 else if (inst_name == "MUL")
                     temp.OP = instruction::type::MUL;
                 parseRInstruction(temp, line);
+                std::cout << "Instruction: OP" << temp.OP << " rd " << temp.rd << " rs1 " << temp.rs1 << " rs2 " << temp.rs2 << std::endl;
             }
             else if (inst_name == "ADDI")
             {
+                temp.OP = instruction::type::ADDI;
                 parseIInstruction(temp, line);
+                std::cout << "Instruction: OP" << temp.OP << " rd " << temp.rd << " rs1 " << temp.rs1 << " rs2 " << temp.rs2 << " imm " << temp.imm << std::endl;
             }
             else if (inst_name == "BEQ")
             {
+                temp.OP = instruction::type::BEQ;
                 parseBInstruction(temp, line);
+                std::cout << "Instruction: OP" << temp.OP << " rd " << temp.rd << " rs1 " << temp.rs1 << " rs2 " << temp.rs2 << " imm " << temp.imm << std::endl;
             }
             else if (inst_name == "LOAD")
             {
+                temp.OP = instruction::type::LOAD;
                 parseLoadInstruction(temp, line);
+                std::cout << "Instruction: OP" << temp.OP << " rd " << temp.rd << " rs1 " << temp.rs1 << " imm " << temp.imm << std::endl;
             }
             else if (inst_name == "STORE")
             {
+                temp.OP = instruction::type::STORE;
                 parseStoreInstruction(temp, line);
+                std::cout << "Instruction: OP" << temp.OP << " rd " << temp.rd << " rs1 " << temp.rs1 << " imm " << temp.imm << std::endl;
             }
             else if (inst_name == "RET")
             {
+
                 temp.OP = instruction::type::RET;
             }
             else if (inst_name == "CALL")
             {
                 temp.OP = instruction::type::CALL;
                 parseCallInstruction(temp, line);
+                std::cout << "Instruction: OP" << temp.OP << " imm " << temp.imm << std::endl;
             }
             else
             {

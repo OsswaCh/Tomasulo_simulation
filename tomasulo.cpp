@@ -1,19 +1,21 @@
 #include "includes.h"
 #include "structs.h"
 #include "parser.h"
+#include <unordered_map>
 #include <vector>
 
-
 ////////////////////////////////////////////////////////
+
+int total_clock_cycle_count; // total number of clock cycles
 
 struct
 {
     string station_name;
-    bool is_empty;
+    bool is_empty = true;
     int value;
 } cdb;
 
-unsigned int data_memory[128];
+unsigned int data_memory[128] = {1, 2, 3};
 
 bool reservation_station::execute_ready()
 {
@@ -23,8 +25,19 @@ bool reservation_station::execute_ready()
     // if FP operation--> return true if Qj and Qk are not empty
     if (this->OP == reservation_station::TYPES::ADDER ||
         this->OP == reservation_station::TYPES::MUL ||
-        this->OP == reservation_station::TYPES::NAND)
+        this->OP == reservation_station::TYPES::NAND ||
+        this->OP == reservation_station::TYPES::BEQ
+
+    )
         if (Qj == "" && Qk == "")
+            return true;
+
+    if (this->OP == reservation_station::TYPES::LOAD)
+        if (Qj == "")
+            return true;
+
+    if (this->OP == reservation_station::TYPES::STORE)
+        if (Qj == "")
             return true;
 
     // //if load operation --> return true if Qj is empty and load buffer is not empty and the last element in the load buffer is the current instruction
@@ -52,6 +65,9 @@ bool reservation_station::wb_ready()
 
     if (this->OP == reservation_station::TYPES::STORE)
         return this->Qk == "";
+
+    if (this->OP == reservation_station::TYPES::BEQ)
+        return this->Qj == "" && this->Qk == "";
 
     return false;
 }
@@ -188,25 +204,6 @@ struct reservation_stations
     }
 };
 
-struct CBD
-{
-    string station_name;
-    bool is_empty;
-    bool reg;
-};
-
-CBD cdb;
-
-void reserveCDB(const reservation_station &rs)
-{
-    cdb.is_empty = false;
-    cdb.reg = rs.inst->rd;
-    cdb.station_name = rs.name;
-}
-
-
-
-
 class RegisterFile
 {
 
@@ -300,13 +297,25 @@ int branch_misprediction_count = 0;
 
 bool program_finished()
 {
-    for (int i = 0; i < instructions.size(); i++)
-    {
-        if (instructions[i].write_back_cycle == -1)
-        {
+    for (int i = 0; i < res_stations->hardware.adders; i++)
+        if (res_stations->adders[i].busy)
             return false;
-        }
-    }
+    for (int i = 0; i < res_stations->hardware.multipliers; i++)
+        if (res_stations->multipliers[i].busy)
+            return false;
+    for (int i = 0; i < res_stations->hardware.nanders; i++)
+        if (res_stations->nanders[i].busy)
+            return false;
+    for (int i = 0; i < res_stations->hardware.loaders; i++)
+        if (res_stations->loader[i].busy)
+            return false;
+    for (int i = 0; i < res_stations->hardware.stores; i++)
+        if (res_stations->stores[i].busy)
+            return false;
+    for (int i = 0; i < res_stations->hardware.branches; i++)
+        if (res_stations->branches[i].busy)
+            return false;
+
     return true;
 }
 
@@ -334,6 +343,8 @@ bool issue(instruction &inst)
                 res_stations->adders[i].OP = reservation_station::TYPES::ADDER;
                 res_stations->adders[i].inst->issue_cycle = current_cycle;
 
+                regfile.register_stat[inst.rd].Qi = &res_stations->adders[i];
+
                 return true;
             }
     }
@@ -358,6 +369,8 @@ bool issue(instruction &inst)
                 res_stations->multipliers[i].imm = inst.imm;
                 res_stations->multipliers[i].OP = reservation_station::TYPES::MUL;
                 res_stations->multipliers[i].inst->issue_cycle = current_cycle;
+
+                regfile.register_stat[inst.rd].Qi = &res_stations->multipliers[i];
 
                 return true;
             }
@@ -385,6 +398,8 @@ bool issue(instruction &inst)
                 res_stations->nanders[i].OP = reservation_station::TYPES::NAND;
                 res_stations->nanders[i].inst->issue_cycle = current_cycle;
 
+                regfile.register_stat[inst.rd].Qi = &res_stations->nanders[i];
+
                 return true;
             }
         }
@@ -406,6 +421,8 @@ bool issue(instruction &inst)
                 res_stations->loader[i].imm = inst.imm;
                 res_stations->loader[i].OP = reservation_station::TYPES::LOAD;
                 res_stations->loader[i].inst->issue_cycle = current_cycle;
+
+                regfile.register_stat[inst.rd].Qi = &res_stations->loader[i];
 
                 loadBuffer.push_back(&res_stations->loader[i]);
 
@@ -497,8 +514,6 @@ void execute()
         else // execution started
         {
 
-            /*note osswa check if it should be written back at 1 or 0*/
-
             // mark the end of the execution
             if (res_stations->adders[i].inst->cycles_left == 0)
             {
@@ -529,16 +544,20 @@ void execute()
             }
         }
 
-        /*note osswa check if it should be written back at 1 or 0
-         */
-        // mark the end of the execution
-        if (res_stations->multipliers[i].inst->cycles_left == 0)
+        else
         {
-            res_stations->multipliers[i].inst->excecution_end_cycle = current_cycle;
-            res_stations->multipliers[i].executed = true;
+
+            /*note osswa check if it should be written back at 1 or 0
+             */
+            // mark the end of the execution
+            if (res_stations->multipliers[i].inst->cycles_left == 0)
+            {
+                res_stations->multipliers[i].inst->excecution_end_cycle = current_cycle;
+                res_stations->multipliers[i].executed = true;
+            }
+            else // decrement the cycles left
+                res_stations->multipliers[i].inst->cycles_left--;
         }
-        else // decrement the cycles left
-            res_stations->multipliers[i].inst->cycles_left--;
     }
 
     // nand excecution
@@ -559,17 +578,20 @@ void execute()
                 res_stations->nanders[i].inst->cycles_left = res_stations->nanders[i].cycles;
             }
         }
-
-        /*note osswa check if it should be written back at 1 or 0
-         */
-        // mark the end of the execution
-        if (res_stations->nanders[i].inst->cycles_left == 0)
+        else
         {
-            res_stations->nanders[i].inst->excecution_end_cycle = current_cycle;
-            res_stations->nanders[i].executed = true;
+
+            /*note osswa check if it should be written back at 1 or 0
+             */
+            // mark the end of the execution
+            if (res_stations->nanders[i].inst->cycles_left == 0)
+            {
+                res_stations->nanders[i].inst->excecution_end_cycle = current_cycle;
+                res_stations->nanders[i].executed = true;
+            }
+            else // decrement the cycles left
+                res_stations->nanders[i].inst->cycles_left--;
         }
-        else // decrement the cycles left
-            res_stations->nanders[i].inst->cycles_left--;
     }
 
     // load excecution
@@ -590,26 +612,30 @@ void execute()
             }
         }
 
-        /*note osswa check if it should be written back at 1 or 0
-         */
-        // mark the end of the execution
-        if (res_stations->loader[i].inst->cycles_left == 0)
+        else
         {
-            if (!res_stations->loader[i].computed_effective_A)
-            {
 
-                res_stations->loader[i].A = res_stations->loader[i].Vj + res_stations->loader[i].imm;
-                res_stations->loader[i].computed_effective_A = true;
-            }
-            else
+            /*note osswa check if it should be written back at 1 or 0
+             */
+            // mark the end of the execution
+            if (res_stations->loader[i].inst->cycles_left == 0)
             {
-                res_stations->loader[i].inst->excecution_end_cycle = current_cycle;
-                res_stations->loader[i].executed = true;
+                if (!res_stations->loader[i].computed_effective_A)
+                {
+
+                    res_stations->loader[i].A = res_stations->loader[i].Vj + res_stations->loader[i].imm;
+                    res_stations->loader[i].computed_effective_A = true;
+                }
+                else
+                {
+                    res_stations->loader[i].inst->excecution_end_cycle = current_cycle;
+                    res_stations->loader[i].executed = true;
+                }
             }
+
+            else // decrement the cycles left
+                res_stations->loader[i].inst->cycles_left--;
         }
-
-        else // decrement the cycles left
-            res_stations->loader[i].inst->cycles_left--;
     }
 
     // store excecution
@@ -646,41 +672,6 @@ void execute()
         }
     }
 
-    // branch excecution
-    for (int i = 0; i < res_stations->hardware.branches; i++)
-    {
-        if (res_stations->branches[i].executed)
-            continue;
-        // case wher the execution is not started yet
-        if (!res_stations->branches[i].started_execution)
-        {
-            // check if the reservation station is ready
-            if (res_stations->branches[i].execute_ready())
-            {
-                // update the reservation station
-                res_stations->branches[i].started_execution = true;
-                res_stations->branches[i].inst->execution_start_cycle = current_cycle;
-                res_stations->branches[i].inst->cycles_left = res_stations->branches[i].cycles;
-            }
-        }
-
-        else
-        {
-
-            /*note osswa check if it should be written back at 1 or 0
-             */
-            // mark the end of the execution
-            if (res_stations->branches[i].inst->cycles_left == 0)
-            {
-                res_stations->branches[i].inst->excecution_end_cycle = current_cycle;
-                res_stations->branches[i].executed = true;
-            }
-            else // decrement the cycles left
-                res_stations->branches[i].inst->cycles_left--;
-        }
-    }
-
-    // call_ret excecution
     for (int i = 0; i < res_stations->hardware.call_ret; i++)
     {
         if (res_stations->call_ret[i].executed)
@@ -713,37 +704,49 @@ void execute()
                 res_stations->call_ret[i].inst->cycles_left--;
         }
     }
-}
-void update()
-{
-    // loop over every station and update it:
-    /**
-     * first do one loop to find the reservations that reached a wb stage
-     * if the isntruction write back to the regfile, reserve the cdb
-     * else, write to the memory or don't write.
-     *
-     * broadcast the update from the cdb to the stations and the registerstat
-     *
-     * then do another loop to update the reservation stations that are not in the wb stage.
-     *
-     *
-     *
-     */
+    // branch excecution
+    for (auto &branch : res_stations->branches)
+    {
+        if (branch.executed)
+            continue;
 
-    write_back();
-    // update reservation stations
-    broadcast_cdb_to_stations();
-
-    // update the register file
-    for (int i = 0; i < regfile.register_stat.size(); i++)
-        if (regfile.register_stat[i].Qi != nullptr && regfile.register_stat[i].Qi->name == cdb.station_name)
+        if (!branch.started_execution && branch.execute_ready())
         {
-            regfile.register_stat[i].Qi = nullptr;
-            regfile.register_stat[i].value = cdb.value;
-            break;
+            branch.started_execution = true;
+            branch.inst->execution_start_cycle = current_cycle;
+            branch.inst->cycles_left = branch.cycles;
         }
+        else if (branch.started_execution)
+        {
+            if (branch.inst->cycles_left == 0)
+            {
+                branch.inst->excecution_end_cycle = current_cycle;
+                branch.executed = true;
+                // Check branch condition
+                if (branch.Vj == branch.Vk)
+                {
+                    // Branch taken
+                    PC = PC + 1 + branch.imm;
+                }
+                else
+                {
+                    // Branch not taken
+                    PC++;
+                }
+            }
+            else
+            {
+                branch.inst->cycles_left--;
+            }
+        }
+    }
+}
 
-    execute();
+void reserveCDB(const reservation_station &rs)
+{
+    cdb.is_empty = false;
+    cdb.value = rs.result;
+    cdb.station_name = rs.name;
 }
 
 void write_back()
@@ -769,6 +772,8 @@ void write_back()
 
             // flush the instruction
             res_stations->adders[i].flush();
+            // add the clocks to the total clock cycles
+            total_clock_cycle_count += res_stations->adders[i].cycles;
         }
     }
 
@@ -790,6 +795,8 @@ void write_back()
 
             // flush the instruction
             res_stations->multipliers[i].flush();
+            // add the clocks to the total clock cycles
+            total_clock_cycle_count += res_stations->multipliers[i].cycles;
         }
     }
 
@@ -811,6 +818,9 @@ void write_back()
 
             // flush the instruction
             res_stations->nanders[i].flush();
+
+            // add the clocks to the total clock cycles
+            total_clock_cycle_count += res_stations->nanders[i].cycles;
         }
     }
 
@@ -838,9 +848,8 @@ void write_back()
 
             // flush the instruction
             res_stations->branches[i].flush();
-
-            // update the PC by adding the immidiate calue to the current PC
-            PC += res_stations->branches[i].imm;
+            // add the clocks to the total clock cycles
+            total_clock_cycle_count += res_stations->branches[i].cycles;
         }
     }
 
@@ -856,12 +865,16 @@ void write_back()
             // note osswa : we might change this
             res_stations->loader[i].A = res_stations->loader[i].Vj + res_stations->loader[i].imm;
 
+            res_stations->loader[i].result = data_memory[res_stations->loader[i].A];
+
             // push the finished instruction to the finished instructions vector
             finished_instructions.push_back(*res_stations->loader[i].inst);
             reserveCDB(res_stations->loader[i]);
 
             // flush the instruction
             res_stations->loader[i].flush();
+            // add the clocks to the total clock cycles
+            total_clock_cycle_count += res_stations->loader[i].cycles;
         }
     }
 
@@ -874,14 +887,16 @@ void write_back()
             // update the cycles
             res_stations->stores[i].inst->write_back_cycle = current_cycle;
 
-            // note osswa : we might change this
-            res_stations->stores[i].result = res_stations->stores[i].Vk;
+            // update the rd
+            data_memory[res_stations->stores[i].A] = res_stations->stores[i].Vk;
 
             // push the finished instruction to the finished instructions vector
             finished_instructions.push_back(*res_stations->stores[i].inst);
 
             // flush the instruction
             res_stations->stores[i].flush();
+            // add the clocks to the total clock cycles
+            total_clock_cycle_count += res_stations->stores[i].cycles;
         }
     }
 
@@ -891,7 +906,7 @@ void write_back()
         // check if the reservation station is ready
         if (res_stations->call_ret[i].wb_ready())
         {
-            // check if call or ret; if call calculate the new pc if ret return to the value stored in r1 in the register file
+            // check if call or ret; if call calculate the new inst_number if ret return to the value stored in r1 in the register file
             if (res_stations->call_ret[i].inst->OP == instruction::type::CALL)
             {
                 // update the cycles
@@ -905,9 +920,8 @@ void write_back()
 
                 // flush the instruction
                 res_stations->call_ret[i].flush();
-
-                // update the PC by changing it t the immidiate value
-                PC = res_stations->call_ret[i].imm;
+                // add the clocks to the total clock cycles
+                total_clock_cycle_count += res_stations->call_ret[i].cycles;
             }
             else if (res_stations->call_ret[i].inst->OP == instruction::type::RET)
             {
@@ -915,41 +929,250 @@ void write_back()
                 res_stations->call_ret[i].inst->write_back_cycle = current_cycle;
 
                 // update the rd
-                res_stations->call_ret[i].inst->rd = regfile.register_stat[res_stations->call_ret[i].inst->rs1].value;
+                // res_stations->call_ret[i].inst->rd = registers[1].first;
 
                 // push the finished instruction to the finished instructions vector
                 finished_instructions.push_back(*res_stations->call_ret[i].inst);
 
                 // flush the instruction
                 res_stations->call_ret[i].flush();
-
-                // update the PC by returning to the value stored in r1 in the register file
-                PC = regfile.register_stat[res_stations->call_ret[i].inst->rs1].value;
+                // add the clocks to the total clock cycles
+                total_clock_cycle_count += res_stations->call_ret[i].cycles;
             }
         }
     }
+
+    for (auto &branch : res_stations->branches)
+    {
+        if (branch.wb_ready())
+        {
+            branch.inst->write_back_cycle = current_cycle;
+            bool taken = (branch.Vj == branch.Vk);
+            if (taken)
+            {
+                // Branch was predicted not taken, but it is taken
+                branch_misprediction_count++;
+                PC = branch.inst->execution_start_cycle + 1 + branch.imm;
+            }
+            else
+            {
+                // Branch was correctly predicted not taken
+                PC++;
+            }
+
+            finished_instructions.push_back(*branch.inst);
+            total_branch_count++;
+            branch.flush();
+            total_clock_cycle_count += branch.cycles;
+        }
+    }
+}
+
+void broadcast_cdb_to_stations()
+{
+    for (int i = 0; i < res_stations->hardware.adders; i++)
+    {
+        if (res_stations->adders[i].Qj != "" && res_stations->adders[i].Qj == cdb.station_name)
+        {
+            res_stations->adders[i].Vj = cdb.value;
+            res_stations->adders[i].Qj = "";
+        }
+        if (res_stations->adders[i].Qk != "" && res_stations->adders[i].Qk == cdb.station_name)
+        {
+            res_stations->adders[i].Vk = cdb.value;
+            res_stations->adders[i].Qk = "";
+        }
+    }
+
+    for (int i = 0; i < res_stations->hardware.multipliers; i++)
+    {
+        if (res_stations->multipliers[i].Qj != "" && res_stations->multipliers[i].Qj == cdb.station_name)
+        {
+            res_stations->multipliers[i].Vj = cdb.value;
+            res_stations->multipliers[i].Qj = "";
+        }
+        if (res_stations->multipliers[i].Qk != "" && res_stations->multipliers[i].Qk == cdb.station_name)
+        {
+            res_stations->multipliers[i].Vk = cdb.value;
+            res_stations->multipliers[i].Qk = "";
+        }
+    }
+
+    for (int i = 0; i < res_stations->hardware.nanders; i++)
+    {
+        if (res_stations->nanders[i].Qj != "" && res_stations->nanders[i].Qj == cdb.station_name)
+        {
+            res_stations->nanders[i].Vj = cdb.value;
+            res_stations->nanders[i].Qj = "";
+        }
+        if (res_stations->nanders[i].Qk != "" && res_stations->nanders[i].Qk == cdb.station_name)
+        {
+            res_stations->nanders[i].Vk = cdb.value;
+            res_stations->nanders[i].Qk = "";
+        }
+    }
+
+    for (int i = 0; i < res_stations->hardware.loaders; i++)
+    {
+        if (res_stations->loader[i].Qj != "" && res_stations->loader[i].Qj == cdb.station_name)
+        {
+            res_stations->loader[i].Vj = cdb.value;
+            res_stations->loader[i].Qj = "";
+        }
+    }
+
+    for (int i = 0; i < res_stations->hardware.stores; i++)
+    {
+        if (res_stations->stores[i].Qj != "" && res_stations->stores[i].Qj == cdb.station_name)
+        {
+            res_stations->stores[i].Vj = cdb.value;
+            res_stations->stores[i].Qj = "";
+        }
+        if (res_stations->stores[i].Qk != "" && res_stations->stores[i].Qk == cdb.station_name)
+        {
+            res_stations->stores[i].Vk = cdb.value;
+            res_stations->stores[i].Qk = "";
+        }
+    }
+
+    for (int i = 0; i < res_stations->hardware.call_ret; i++)
+    {
+        if (res_stations->call_ret[i].Qj != "" && res_stations->call_ret[i].Qj == cdb.station_name)
+        {
+            res_stations->call_ret[i].Vj = cdb.value;
+            res_stations->call_ret[i].Qj = "";
+        }
+        if (res_stations->call_ret[i].Qk != "" && res_stations->call_ret[i].Qk == cdb.station_name)
+        {
+            res_stations->call_ret[i].Vk = cdb.value;
+            res_stations->call_ret[i].Qk = "";
+        }
+    }
+
+    for (int i = 0; i < res_stations->hardware.branches; i++)
+    {
+        if (res_stations->adders[i].Qj != "" && res_stations->branches[i].Qj == cdb.station_name)
+        {
+            res_stations->branches[i].Vj = cdb.value;
+            res_stations->branches[i].Qj = "";
+        }
+        if (res_stations->branches[i].Qk == cdb.station_name)
+        {
+            res_stations->branches[i].Vk = cdb.value;
+            res_stations->branches[i].Qk = "";
+        }
+    }
+}
+
+void update_regfile()
+{
+    for (int i = 1; i < regfile.register_stat.size(); i++)
+        if (regfile.register_stat[i].Qi != nullptr && regfile.register_stat[i].Qi->name == cdb.station_name)
+        {
+            regfile.register_stat[i].Qi = nullptr;
+            regfile.register_stat[i].value = cdb.value;
+            break;
+        }
+}
+void update()
+{
+    // loop over every station and update it:
+    /**
+     * first do one loop to find the reservations that reached a wb stage
+     * if the isntruction write back to the regfile, reserve the cdb
+     * else, write to the memory or don't write.
+     *
+     * broadcast the update from the cdb to the stations and the registerstat
+     *
+     * then do another loop to update the reservation stations that are not in the wb stage.
+     *
+     *
+     *
+     */
+
+    write_back();
+    // update reservation stations
+    broadcast_cdb_to_stations();
+
+    // update the register file
+    update_regfile();
+
+    cdb.is_empty = true;
+    cdb.station_name = "";
+    cdb.value = 0;
+
+    execute();
+}
+unordered_map<string, int> labelMap;
+
+// calculate the IPC
+void calculateIPC()
+{
+    double IPC = (double)finished_instructions.size() / (double)total_clock_cycle_count;
+    cout << "IPC: " << IPC << endl;
+}
+
+void printCycles()
+{
+    std::ofstream myfile; // Specify the namespace for ofstream
+    myfile.open("cycles.csv");
+    myfile << "Instruction,Issue,Execution Start,Execution End,Write Back\n";
+    for (int i = 0; i < finished_instructions.size(); i++)
+    {
+        myfile  << std::to_string(finished_instructions[i].issue_cycle) << "," << std::to_string(finished_instructions[i].execution_start_cycle) << "," << std::to_string(finished_instructions[i].excecution_end_cycle) << "," << std::to_string(finished_instructions[i].write_back_cycle) << "\n";
+    }
+    myfile.close();
 }
 
 int main()
 {
 
     // TODO: read data into instructions vector here
+    // readInstructions("test.txt", instructions, labelMap); // main logic
+
+    // instructions.push_back(instruction(instruction::type::ADDI, 0, 0, 1, 2)); // ADDI R1, R0, 2
+    // // instructions.push_back(instruction(instruction::type::ADD, 1, 0, 2));     // ADD R2, R1, R0
+    // // instructions.push_back(instruction(instruction::type::NAND, 1, 2, 3));     // ADD R2, R1, R0
+    // instructions.push_back(instruction(instruction::type::STORE, 0, 1, 0, 0)); // STORE R1, 0(R0)
+    // instructions.push_back(instruction(instruction::type::ADD, 0, 0, 0));     // ADD R2, R1, R0
+    // instructions.push_back(instruction(instruction::type::ADD, 0, 0, 0));     // ADD R2, R1, R0
+    // instructions.push_back(instruction(instruction::type::ADD, 0, 0, 0));     // ADD R2, R1, R0
+    // instructions.push_back(instruction(instruction::type::ADD, 0, 0, 0));     // ADD R2, R1, R0
+    // instructions.push_back(instruction(instruction::type::LOAD, 0, 0, 3, 0)); // LOAD R2, 0(R0)
+    // instructions.push_back(instruction(instruction::type::STORE, 0, 0, 0, 0)); // STORE R0, 0(R0)
+    // instructions.push_back(instruction(instruction::type::LOAD, 0, 0, 1, 0)); // LOAD R1, 0(R0)
+    // instructions.push_back(instruction(instruction::type::BEQ, 1, 2, 0, 2)); // BEQ R1, R2, 2
+
     readInstructions("test.txt", instructions); // main logic
 
-    
-
-
-    return 1;
-    while (!program_finished())
+    hardware_input hw;
+    res_stations = new reservation_stations(hw);
+    bool finished = false;
+    do
     {
 
         current_cycle++;
-        instruction inst = instructions[PC];
 
         update();
+        if (PC < instructions.size())
+        {
+            // instruction inst = instructions[PC];
+            bool issued = issue(instructions[PC]);
+            if (issued)
+                PC++;
+        }
+        finished = program_finished();
+    } while (!finished);
 
-        bool issued = issue(inst);
-        if (issued)
-            PC++;
+    for (int i = 0; i < regfile.register_stat.size(); i++)
+    {
+        cout << "Register " << i << " : " << regfile.register_stat[i].value << endl;
     }
+
+    cout << "MEMORY 0" << data_memory[0] << endl;
+
+    calculateIPC();
+    printCycles();
+    cout<<"Branch misprediction rate: "<<branch_misprediction_count<<endl; 
+
 }
