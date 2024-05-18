@@ -1124,6 +1124,18 @@ void printCycles()
     myfile.close();
 }
 
+void writeClockCycles()
+{
+    ofstream myfile;
+    myfile.open("clock_cycles.csv");
+    myfile << "Issue,Execution Start,Execution End,Write Back\n";
+    for (auto &inst : finished_instructions)
+    {
+        myfile << inst.issue_cycle << "," << inst.execution_start_cycle << "," << inst.excecution_end_cycle << "," << inst.write_back_cycle << "\n";
+    }
+    myfile.close();
+}
+
 int main()
 {
 
@@ -1173,6 +1185,7 @@ int main()
 
     calculateIPC();
     printCycles();
+    writeClockCycles();
     cout<<"Branch misprediction rate: "<<branch_misprediction_count<<endl; 
 
 }
