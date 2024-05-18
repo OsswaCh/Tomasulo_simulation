@@ -1,794 +1,1807 @@
-/////////////////////////////general notes/////////////////////////////
+//#include "reservation_stations.h"
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <queue>
+#include <algorithm>
+using namespace std;
 
-// cntl + f note + nadia to find my notes left for you
-// do the same for any notes you leave for me
-// if you need a variable to be changed outside the function you are writing, make sure to write the name of the function and include it in the checklist
 
-//- i made PC a global variable and removed it from the instruction class // i moved them to global.h and global.cpp
-// call and ret are handeled as an addition in the execution stage
-
-// we might not need the buffers?
-/////////////////////////////checklist/////////////////////////////
-/*
-- do the clock
-- create the load and store buffers
-- we may have the cdb as a queue in the run funcition
-- we will be doing the actual calculation of the values in the wb stage
-- the branching is also not handeled in the execution stage, it is treated as a normal add/sub operation
-- for now i am going to put the branching function in the reservation_station class, we might change that later
-- i added a after_branch varaible in the instruction class to know if the instruction comes after a branch or not --> set during ussuing (append the instruction to the after_branch vector)
-- check if the afterbranch vector is made of instrucitons or reservation stations
-- make PC increment in the run function (check the icrement if it should be +1 or no in branch )
-- no branch?
-- for the load and store make sure if the address should be calculated in the wb or in the buffer (we might not need a buffer)
-- make the ready function in the reservation station class
-- check the call ret wb functionality
-
-*/
-/////////////////////////////code/////////////////////////////
-
-#pragma once
-#include "includes.h";
-
-/////////////////////////////////////////other classes/////////////////////////////////////////
-// first step
-class instruction
-{
-
-public:
-    // instruction components
-
+struct Instruction {
+    int PC_idx;
+    int exec_rem_cycles;
+    int issued_cycle;
+    int exec_begin_cycle;
+    int exec_end_cycle;
+    int wb_cycle;
+    string op;
     int rs1;
     int rs2;
     int rd;
     int imm;
 
-    // used for the tracking of instruction
-    short issue_cycle;
-    short execution_start_cycle;
-    short excecution_end_cycle;
-    short write_back_cycle;
-    short cycle_count_per_instruction;
-    short cycles_left;
-    short instruction_status;
-
-    // after branch
-    bool after_branch = false;
-
-    // intruction type
-    enum instruction_type
+    Instruction(int PC = 0, string operation = "", int rs1 = 0, int rs2 = 0, int rd = 0, int imm = 0, int cycles = 0)
     {
-        ADD,
-        ADDI,
-        NAND,
-        MUL,
-        LOAD,
-        STORE,
-        BEQ,
-        CALL,
-        RET
-    };
-
-    // constructor
-    instruction(string operation = "", int rs1 = 0, int rs2 = 0, int rd = 0, int imm = 0, short cycles = 0, bool after_branch) : rs1(rs1), rs2(rs2), rd(rd), imm(imm), cycle_count_per_instruction(cycles), after_branch(after_branch)
-    {
-        issue_cycle = INT_MIN;
-        execution_start_cycle = INT_MIN;
-        excecution_end_cycle = INT_MIN;
-        write_back_cycle = INT_MIN;
-        cycles_left = cycles;
+        PC_idx = PC; this->op = operation; this->rs1 = rs1; this->rs2 = rs2; this->rd = rd; this->imm = imm; exec_rem_cycles = cycles;
     }
-    // destructor
-    ~instruction() {}
+
+    void print() { cout << "PC: " << PC_idx << " OP: " << op << " RS1: " << rs1 << " RS2: " << rs2 << " RD: " << rd; }
 };
 
-class reservation_station
-{
-
+class rs_station {
 public:
-    // functions to be inherited by other classes
-    bool ready();
-    void execute();
-    void write_back();
+    bool load_store_hazard;
+    string name;
+    bool busy;          // The if this unit is busy
+    Instruction inst;  // the instruction
+    int Vj;             // Value in the register of the first operand
+    string Qj;
+    bool not_allowed;
+    int exec_time;
+    bool finished_exec;
+    rs_station() { busy = false; inst = Instruction(); Vj = 0; Qj = ""; not_allowed = false; finished_exec = false; load_store_hazard = false; }
+    virtual bool can_exec() { return false; }    // Checks if we can start executing
+    virtual void exec() {}       // Exectuting the function
+    virtual void wb() {}          // Writing back
+    virtual void flush() {}
+
+};
+
+
+////////////////////////////////////////////////// Classes ///////////////////////////////////////////////////////
+
+
+class abs_station : public rs_station {
+public:
+    void issue();
+    bool can_exec() { return (Qj == "" && !not_allowed); } 
+    void exec();
+    void wb();
+    void flush();
+};
+
+class add_station : public rs_station {
+public:
+    string op;
+    int A; // immediate
+    int Vk;
+    string Qk;
+    bool can_exec() { return (Qj == "" && Qk == "" && !not_allowed); }
+    void issue();
+    void exec();
+    void wb();
+    void flush();
+};
+
+class beq_station : public rs_station {
+public:
+    int A; // immediate
+    int Vk;             // Value in the rs2
+    string Qk;
+    bool can_exec() { return (Qj == "" & Qk == ""); }
+    void issue();
+    void exec();
+    void wb();
     void flush();
     void branch();
-    void no_branch();
-    void call_ret();
+    void dont_branch();
+};
 
-    // components of reservation station
-    string OP;
-    string name;
-    bool busy;
-    string Qj, Qk;
-    int Vj, Vk;
-    int A;
+class div_station : public rs_station {
+public:
+    int Vk;
+    string Qk;
+    bool can_exec() { return (Qj == "" && Qk == "" && !not_allowed); }
+    void issue();
+    void exec();
+    void wb();
+    void flush();
+};
+
+class jal_station : public rs_station {
+public:
+    int A; // immediate
+    string op;
+    bool can_exec() { return (((Qj == "" && inst.op=="JALR") || inst.op == "JAL") && !not_allowed); };
+    void issue();
+    void wb();
+    void exec();
+    void flush();
+};
+
+class store_station : public rs_station {
+public:
+    int A; // immediate
+    int Vk;             // Value in the rs2
+    string Qk;
+    int addr_calc;
+    int write_mem;
+    int rem_write_mem;
+    bool addr_calculated;
+    rs_station* load_store_waiting_for;
+
+    void issue();
+    bool can_exec() { return (Qj == "" && !not_allowed); } 
+    void exec();
+    bool can_wb() { return Qk == ""; }
+    void wb();
+    void check_load_store();
+    void flush();
+};
+
+
+class load_station : public rs_station {
+public:
+    int A; // immediate
+    int addr_calc;
+    int read_mem;
+    bool addr_calculated;
+    store_station* store_waiting_for;
+    void issue();
+    bool can_exec() { return (Qj == "" && !not_allowed && (!addr_calculated || !load_store_hazard)); } 
+    void exec();
+    void wb();
+    void flush();
+    void check_store();
+};
+
+class neg_station : public rs_station {
+public:
+    void issue();
+    bool can_exec() { return (Qj == "" && !not_allowed); } //WE STILL NEED TO CHECK IF IT IS THE HEAD OF THE LOAD-STORE QUEUE
+    void exec();
+    void wb();
+    void flush();
+};
+
+/// <summary>
+/// ///////////////////////////////// RS ///////////////////////////////////////////////////////////////
+/// </summary>
+
+class reservation_stations {
+public:
+    vector<load_station> rs_lw;
+    vector<store_station> rs_sw;
+    vector<beq_station> rs_beq;
+    vector<jal_station> rs_jal;
+    vector<add_station> rs_add;
+    vector<neg_station> rs_neg;
+    vector<abs_station> rs_abs;
+    vector<div_station> rs_div;
+
+    void init(int lw, int lw_addr_calc, int lw_read_mem, int sw, int sw_addr_calc, int sw_read_mem,
+        int beq, int beq_exec, int jal, int jal_exec, int add, int add_exec, int neg, int neg_exec,
+        int abs, int abs_exec, int div, int div_exec);
+    void issue_load();
+    void issue_store();
+    void issue_beq();
+    void issue_jal();
+    void issue_add();
+    void issue_neg();
+    void issue_abs();
+    void issue_div();
+    void update_rs(string r, int result);
+    void wb_store();
+    void wb_beq();
+    void execute();
+    bool done(); // Returns true if none of the stations is busy
+};
+
+vector<Instruction> inst_mem;
+vector<string> RegisterStat(8, "");
+vector<string> RegisterStat_buffer(8, "");
+vector<int> Regs(8);
+reservation_stations rs;
+vector<int> Mem(65536, 0);
+int clk;
+bool jump_issued;
+bool branch_issued;
+vector<rs_station*> load_store_queue;
+int PC;
+vector<rs_station*> cdb;
+vector<Instruction> finished_inst;
+vector<rs_station*> after_branch;
+int total_branches_num;
+int branch_mispredicted;
+
+////////////////////////// Read Memory //////////////////////////////////
+void read_memory(string memory_file)
+{
+    std::ifstream indata;
+    indata.open(memory_file);
+    if (indata.fail())
+    {
+        std::cerr << "Error: file could not be opened" << std::endl;
+        exit(1);
+    }
+    std::string line;
+    size_t pos = 0;
+    int token;
+    while(getline(indata,line))
+    {
+        while ((pos = line.find(":")) != string::npos) {
+        token = stoi(line.substr(0, pos));
+        line.erase(0, pos + 1);
+        Mem[token] = stoi(line);
+    }
+    }
+
+}
+
+/// <summary>
+/// /////////////////////////////// MAIN ///////////////////////////////////////////////////////////////////////////////////////
+/// </summary>
+vector<int> getUserinput();
+void Issue();
+void read_instructions(string file_name, int starting_PC, vector<int> userInput);
+void run_program(int start_PC);
+bool compare_issue_time(rs_station* a, rs_station* b);
+bool compare_finished_inst(Instruction a, Instruction b) { return a.issued_cycle < b.issued_cycle; }
+void fileMaker();
+
+int main() {
+    string file_name;
+    cout << "Enter the name of the file which contains the program: ";
+    cin >> file_name;
+
+
+    vector<int> userInput = getUserinput();
+    int start_PC = userInput[0];
+    rs.init(userInput[1],userInput[2], userInput[3], userInput[4],
+    userInput[5], userInput[6], userInput[7], userInput[8],userInput[9],
+    userInput[10], userInput[11], userInput[12], userInput[13], userInput[14],
+    userInput[15], userInput[16], userInput[17], userInput[18]);
+    queue<rs_station*> load_store_queue;
+
+    queue<Instruction> inst_queue;
+    read_memory("memory.txt");
+    //cout<<endl<<"memory<<\n"<<Mem[0]<<endl<<endl<<Mem[12]<<endl<<"end of memory"<<endl;
+    read_instructions(file_name, start_PC, userInput); // Now we have a queue with all the instructions
+
+    run_program(start_PC);
+
+    cout << "The total execution time is " << clk << " cycles.\n";
+    cout << "IPC = " << finished_inst.size() / (float)clk << endl;
+    cout << "Branch Misprediction Rate= " << branch_mispredicted / (float)total_branches_num << endl;
+    sort(finished_inst.begin(), finished_inst.end(), compare_finished_inst);
+    fileMaker();
+
+    std::cout<<"\nRegister File\n";
+    for (int i=0;i<Regs.size();i++)
+    {
+       std::cout<<i<<" : "<<Regs[i]<<std::endl;
+    }
+    return 0;
+}
+
+void run_program(int start_PC) {
+    //cout << "Starting to run program\n";
+    PC = start_PC;
+    clk = 0;
+    jump_issued = false;
+    branch_issued = false;
+    total_branches_num = 0;
+    branch_mispredicted = 0;
+    while ((PC < inst_mem.size()) || !rs.done()) {
+        //cout << "Cycle: " << clk << endl;
+        //WB
+        sort(cdb.begin(), cdb.end(), compare_issue_time);
+        if (!cdb.empty()) {
+            cdb[0]->wb();
+            cdb.erase(cdb.begin());
+        }
+        rs.wb_store();
+        rs.wb_beq();
+
+        //EXEC
+        rs.execute();
+
+        //ISSUE
+        if (!jump_issued && (PC < inst_mem.size()))
+            Issue();
+        
+        /*cout << "RegisterStat: ";
+        for (int i = 0; i < RegisterStat.size(); i++) {
+            cout << RegisterStat[i] << " - ";
+        }
+        cout << endl;*/
+
+        /*cout << "Register File: ";
+        for (int i = 0; i < Regs.size(); i++) {
+            cout << Regs[i] << " - ";
+        }
+        cout << endl;*/
+
+        clk++;
+    }
+
+}
+
+bool compare_issue_time(rs_station* a, rs_station* b) {
+    return a->inst.issued_cycle < b->inst.issued_cycle;
+}
+
+void Issue() {
+    if (inst_mem[PC].op == "LW") {
+        rs.issue_load();
+    }
+    else if (inst_mem[PC].op == "SW") {
+        rs.issue_store();
+    }
+    else if (inst_mem[PC].op == "BEQ") {
+        if (!branch_issued) {
+            rs.issue_beq();
+        }
+    }
+    else if (inst_mem[PC].op == "JAL" || inst_mem[PC].op == "JALR") {
+        rs.issue_jal();
+    }
+    else if (inst_mem[PC].op == "ADD" || inst_mem[PC].op == "ADDI") {
+        rs.issue_add();
+    }
+    else if (inst_mem[PC].op == "NEG") {
+        rs.issue_neg();
+    }
+    else if (inst_mem[PC].op == "ABS") {
+        rs.issue_abs();
+    }
+    else if (inst_mem[PC].op == "DIV") {
+        rs.issue_div();
+    }
+
+
+}
+vector<int> getUserinput()
+{
+    vector<int> userInput(19,0);
+    std::cout<<"Please enter the starting address of your instruction memory: ";
+    cin>>userInput[0];
+    std::cout<<"Please enter the number of LW stations: ";
+    cin>>userInput[1];
+    std::cout<<"Please enter the number of cycles to compute the LW address: ";
+    cin>>userInput[2];
+    std::cout<<"Please enter the number of cycles to read from the memory: ";
+    cin>>userInput[3];
+    std::cout<<"Please enter the number of SW stations: ";
+    cin>>userInput[4];
+    std::cout<<"Please enter the number of cycles to compute the SW address: ";
+    cin>>userInput[5];
+    std::cout<<"Please enter the number of cycles to write to the memory: ";
+    cin>>userInput[6];
+    std::cout<<"Please enter the number of BEQ stations: ";
+    cin>>userInput[7];
+    std::cout<<"Please enter the number of cycles to execute BEQ: ";
+    cin>>userInput[8];
+    std::cout<<"Please enter the number of JAL/JALR stations: ";
+    cin>>userInput[9];
+    std::cout<<"Please enter the number of cycles to execute JAL/JALR: ";
+    cin>>userInput[10];
+    std::cout<<"Please enter the number of ADD/ADDI stations: ";
+    cin>>userInput[11];
+    std::cout<<"Please enter the number of cycles to execute ADD/ADDI: ";
+    cin>>userInput[12];
+    std::cout<<"Please enter the number of NEG stations: ";
+    cin>>userInput[13];
+    std::cout<<"Please enter the number of cycles to execute NEG: ";
+    cin>>userInput[14];
+    std::cout<<"Please enter the number of ABS stations: ";
+    cin>>userInput[15];
+    std::cout<<"Please enter the number of cycles to execute ABS: ";
+    cin>>userInput[16];
+    std::cout<<"Please enter the number of DIV stations: ";
+    cin>>userInput[17];
+    std::cout<<"Please enter the number of cycles to execute DIV: ";
+    cin>>userInput[18];
+    cout << endl;
+
+    return userInput;
+}
+
+void fileMaker()
+{
+    ofstream myfile;
+    myfile.open("results.csv");
+
+    myfile << "PC,time of issue,begining execution,ending execution,writing back\n";
+    for (int i = 0; i < finished_inst.size(); i++)
+    {
+        myfile << to_string(finished_inst[i].PC_idx) + ","
+            + to_string(finished_inst[i].issued_cycle) + ","
+            + to_string(finished_inst[i].exec_begin_cycle) + ","
+            + to_string(finished_inst[i].exec_end_cycle) + ","
+            + to_string(finished_inst[i].wb_cycle) + "\n";
+    }
+    myfile.close();
+
+}
+
+void read_instructions(string file_name, int starting_PC, vector<int> userInput)
+{
+    std::ifstream indata;
+    std::string inst_full;
+    std::string inst_op;
+    std::string inst_rs1;
+    std::string inst_rs2;
+    std::string inst_rd;
+    std::string inst_imm;
+    std::string temp;
+    int rs1;
+    int rs2;
+    int rd;
+    int imm;
     int cycles;
-    instruction *inst;
-
-    // number of reservation stations
-    int size;
-
-    // contructors
-    reservation_station(string OP = "",
-                        string name = "",
-                        bool busy = false,
-                        string Qj = "",
-                        string Qk = "",
-                        int A = 0,
-                        int Vj = -1,
-                        int Vk = -1,
-                        int size = 0,
-                        int cycles,
-                        instruction *inst) : OP(OP), name(name), busy(busy), Qj(Qj), Qk(Qk), A(A), Vj(Vj), Vk(Vk), size(size), cycles(cycles), inst(inst) {}
-
-    // destructor
-    ~reservation_station()
+    indata.open(file_name);
+    if (indata.fail())
     {
-        inst = nullptr;
-    }
-};
-
-class Registers
-{
-public:
-    // register status array
-    vector<pair<int, bool>> register_station;
-
-    // constructor
-    Registers(int size)
-    {
-        register_station.resize(size, make_pair(0, false));
+        std::cerr << "Error: file could not be opened" << std::endl;
+        exit(1);
     }
 
-    // destructor
-    ~Registers()
+    int idx = starting_PC;
+    while (std::getline(indata, inst_op, ' ')) //reading operation till space
     {
-        register_station.clear();
-    }
 
-    // returns the status of the register
-    bool is_busy(int reg)
-    {
-        if (reg < 0 || reg >= register_station.size())
+        if (inst_op == "LW")
         {
-            return false;
+            std::getline(indata, inst_rd, ','); //reading rd till ','
+            inst_rd.erase(0, 1); //removing the 'x'
+            rd = stoi(inst_rd);
+
+            std::getline(indata, inst_imm, '('); //reading imm till '('
+            inst_imm.erase(0, 1); //removing the ' '
+            imm = stoi(inst_imm);
+
+            std::getline(indata, inst_rs1, ')'); //reading rs1 till ')'
+            inst_rs1.erase(0, 1); //removing the 'x'
+            rs1 = stoi(inst_rs1);
+
+            std::getline(indata, temp); //move to the next instruction
+
+            rs2 = -1; //no rs2 in LW
+
+            cycles = userInput[1]+userInput[2];
         }
-        return register_station[reg].second;
-    }
-
-    // set the register value to false once the value is written to the register
-    void written_to(int reg)
-    {
-        if (reg < 0 || reg >= register_station.size())
+        else
         {
-            return;
-        }
-        register_station[reg].second = false;
-    }
-};
-
-/////////////////////////////////////////Hardware input/////////////////////////////////////////
-struct hardware_input
-{
-
-    // default sizes of the reservation stations
-    int adders = 4;
-    int multipliers = 2;
-    int loaders = 2;
-    int stores = 1;
-    int branches = 1;
-    int nanders = 2;
-    int call_ret = 1;
-
-    // default number of cycles
-    int laod_cycles = 6;
-    int store_cycles = 6;
-    int branch_cycles = 1;
-    int call_ret_cycles = 1;
-    int add_cycles = 2;
-    int mul_cycles = 8;
-    int nand_cycles = 1;
-
-    // we may need these??????
-    int memory;
-    int registers;
-
-    void user_input()
-    {
-        // hardware input
-        cout << "Enter the number of adders: ";
-        cin >> adders;
-        cout << "Enter the number of multipliers: ";
-        cin >> multipliers;
-        cout << "Enter the number of loaders: ";
-        cin >> loaders;
-        cout << "Enter the number of stores: ";
-        cin >> stores;
-        cout << "Enter the number of nanders: ";
-        cin >> nanders;
-
-        // cycles input
-        cout << "Enter the number of cycles for load: ";
-        cin >> laod_cycles;
-        cout << "Enter the number of cycles for store: ";
-        cin >> store_cycles;
-        cout << "Enter the number of cycles for branch: ";
-        cin >> branch_cycles;
-        cout << "Enter the number of cycles for call/ret: ";
-        cin >> call_ret_cycles;
-        cout << "Enter the number of cycles for add: ";
-        cin >> add_cycles;
-        cout << "Enter the number of cycles for mul: ";
-        cin >> mul_cycles;
-        cout << "Enter the number of cycles for nand: ";
-        cin >> nand_cycles;
-    }
-};
-
-/////////////////////////////////////////Reservation stations/////////////////////////////////////////
-
-struct reservation_stations
-{
-
-    vector<reservation_station> adders;
-    vector<reservation_station> multipliers;
-    vector<reservation_station> loader;
-    vector<reservation_station> stores;
-    vector<reservation_station> nanders;
-
-    hardware_input hardware;
-
-    // initialize the reservation stations
-    reservation_stations(hardware_input hardware) : hardware(hardware)
-    {
-        for (int i = 0; i < hardware.adders; i++)
-        {
-            adders.push_back(reservation_station("ADD", "adder" + to_string(i), false, "", "", 0, -1, -1, hardware.adders, hardware.add_cycles));
-        }
-        for (int i = 0; i < hardware.multipliers; i++)
-        {
-            multipliers.push_back(reservation_station("MUL", "multiplier" + to_string(i), false, "", "", 0, -1, -1, hardware.multipliers, hardware.mul_cycles));
-        }
-        for (int i = 0; i < hardware.loaders; i++)
-        {
-            loader.push_back(reservation_station("LOAD", "loader" + to_string(i), false, "", "", 0, -1, -1, hardware.loaders, hardware.laod_cycles));
-        }
-        for (int i = 0; i < hardware.stores; i++)
-        {
-            stores.push_back(reservation_station("STORE", "store" + to_string(i), false, "", "", 0, -1, -1, hardware.stores, hardware.store_cycles));
-        }
-        for (int i = 0; i < hardware.nanders; i++)
-        {
-            nanders.push_back(reservation_station("NAND", "nander" + to_string(i), false, "", "", 0, -1, -1, hardware.nanders, hardware.nand_cycles));
-        }
-    }
-
-    // check if the reservation station is full
-    bool full(string OP)
-    {
-        if (OP == "ADD")
-        {
-            for (int i = 0; i < hardware.adders; i++)
+            if (inst_op == "SW")
             {
-                if (!adders[i].busy)
+                std::getline(indata, inst_rs2, ','); //reading rs2 till ','
+                inst_rs2.erase(0, 1); //removing the 'x'
+                rs2 = stoi(inst_rs2);
+
+                std::getline(indata, inst_imm, '('); //reading imm till '('
+                inst_imm.erase(0, 1); //removing the ' '
+                imm = stoi(inst_imm);
+
+                std::getline(indata, inst_rs1, ')'); //reading rs1 till ')'
+                inst_rs1.erase(0, 1); //removing the 'x'
+                rs1 = stoi(inst_rs1);
+
+                std::getline(indata, temp); //move to the next instruction
+
+                rd = -1; //no rd in SW
+
+                cycles = userInput[5];
+            }
+            else
+            {
+                if (inst_op == "BEQ")
                 {
-                    return false;
+                    std::getline(indata, inst_rs1, ','); //reading rs1 till ','
+                    inst_rs1.erase(0, 1); //removing the 'x'
+                    rs1 = stoi(inst_rs1);
+
+                    std::getline(indata, inst_rs2, ','); //reading rs2 till ','
+                    inst_rs2.erase(0, 2); //removing the ' ' and 'x'
+                    rs2 = stoi(inst_rs2);
+
+                    std::getline(indata, inst_imm); //reading imm till ''
+                    inst_imm.erase(0, 1); //removing the ' '
+                    imm = stoi(inst_imm);
+
+                    rd = -1; //no rd in BEQ
+
+                    cycles = userInput[8];
+                }
+                else
+                {
+                    if (inst_op == "JAL")
+                    {
+                        std::getline(indata, inst_rd, ','); //reading rd till ','
+                        inst_rd.erase(0, 1); //removing the 'x'
+                        rd = stoi(inst_rd);
+
+                        std::getline(indata, inst_imm); //reading imm till ''
+                        inst_imm.erase(0, 1); //removing the ' '
+                        imm = stoi(inst_imm);
+
+                        rs1 = -1; //no rs1 in jal
+                        rs2 = -1; //no rs2 in jal
+
+                        cycles = userInput[10];
+                    }
+                    else
+                    {
+                        if (inst_op == "JALR")
+                        {
+                            std::getline(indata, inst_rd, ','); //reading rd till ','
+                            inst_rd.erase(0, 1); //removing the 'x'
+                            rd = stoi(inst_rd);
+
+                            std::getline(indata, inst_rs1); //reading rs1 till ''
+                            inst_rs1.erase(0, 2); //removing the ' ' and the 'x'
+                            rs1 = stoi(inst_rs1);
+
+                            imm = -999999999; //no imm in jal
+                            rs2 = -1; //no rs2 in jal
+
+                            cycles = userInput[10];;
+                        }
+                        else
+                        {
+                            if (inst_op == "ADD")
+                            {
+
+                                std::getline(indata, inst_rd, ','); //reading rd till ','
+                                inst_rd.erase(0, 1); //removing the 'x'
+                                rd = stoi(inst_rd);
+
+                                std::getline(indata, inst_rs1, ','); //reading rs1 till ','
+                                inst_rs1.erase(0, 2); //removing the ' ' and the 'x'
+                                rs1 = stoi(inst_rs1);
+
+                                std::getline(indata, inst_rs2); //reading rs2 till ''
+                                inst_rs2.erase(0, 2); //removing the ' ' and 'x'
+                                rs2 = stoi(inst_rs2);
+
+                                imm = -999999999; //no imm in add
+
+                                cycles = userInput[12];
+                            }
+                            else
+                            {
+                                if (inst_op == "ADDI")
+                                {
+                                    std::getline(indata, inst_rd, ','); //reading rd till ','
+                                    inst_rd.erase(0, 1); //removing the 'x'
+                                    rd = stoi(inst_rd);
+
+                                    std::getline(indata, inst_rs1, ','); //reading rs1 till ','
+                                    inst_rs1.erase(0, 2); //removing the the ' ' and the 'x' 
+                                    rs1 = stoi(inst_rs1);
+
+                                    std::getline(indata, inst_imm); //reading imm till ''
+                                    inst_imm.erase(0, 1); //removing the ' '
+                                    imm = stoi(inst_imm);
+
+                                    rs2 = -1; //no rs2 in addi
+
+                                    cycles = userInput[12];
+                                }
+                                else
+                                {
+                                    if (inst_op == "NEG")
+                                    {
+                                        std::getline(indata, inst_rd, ','); //reading rd till ','
+                                        inst_rd.erase(0, 1); //removing the 'x'
+                                        rd = stoi(inst_rd);
+
+                                        std::getline(indata, inst_rs1); //reading rs1 till ''
+                                        inst_rs1.erase(0, 2); //removing the ' ' and the 'x'
+                                        rs1 = stoi(inst_rs1);
+
+                                        imm = -999999999; //no imm in NEG
+
+                                        rs2 = -1; //no rs2 in NEG
+
+                                        cycles = userInput[14];
+                                    }
+                                    else
+                                    {
+                                        if (inst_op == "ABS")
+                                        {
+                                            std::getline(indata, inst_rd, ','); //reading rd till ','
+                                            inst_rd.erase(0, 1); //removing the 'x'
+                                            rd = stoi(inst_rd);
+
+                                            std::getline(indata, inst_rs1); //reading rs1 till ''
+                                            inst_rs1.erase(0, 2); //removing the ' ' and the 'x'
+                                            rs1 = stoi(inst_rs1);
+
+                                            imm = -999999999; //no imm in ABS
+                                            rs2 = -1; //no rs2 in ABS
+
+                                            cycles = userInput[16];
+                                        }
+                                        else
+                                        {
+                                            if (inst_op == "DIV")
+                                            {
+                                                std::getline(indata, inst_rd, ','); //reading rd till ','
+                                                inst_rd.erase(0, 1); //removing the 'x'
+                                                rd = stoi(inst_rd);
+
+                                                std::getline(indata, inst_rs1, ','); //reading rs1 till ','
+                                                inst_rs1.erase(0, 2); //removing the ' ' and the 'x'
+                                                rs1 = stoi(inst_rs1);
+
+                                                std::getline(indata, inst_rs2); //reading rs2 till ''
+                                                inst_rs2.erase(0, 2); //removing the ' ' and 'x'
+                                                rs2 = stoi(inst_rs2);
+
+                                                imm = -999999999; //no imm in div
+
+                                                cycles = userInput[18];
+                                            }
+                                            else
+                                            {
+                                                std::cout << "Instruction unidentified\n";
+                                                exit(1);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            return true;
+
         }
-        else if (OP == "MUL")
-        {
-            for (int i = 0; i < hardware.multipliers; i++)
-            {
-                if (!multipliers[i].busy)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-        else if (OP == "LOAD")
-        {
-            for (int i = 0; i < hardware.loaders; i++)
-            {
-                if (!loader[i].busy)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-        else if (OP == "STORE")
-        {
-            for (int i = 0; i < hardware.stores; i++)
-            {
-                if (!stores[i].busy)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-        else if (OP == "NAND")
-        {
-            for (int i = 0; i < hardware.nanders; i++)
-            {
-                if (!nanders[i].busy)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
+        Instruction inst(idx, inst_op, rs1, rs2, rd, imm, cycles);
+        inst_mem.push_back(inst);
+        idx++;
     }
+    indata.close();
 
-    // check if the reservation station is empty ==> program is done
-    bool program_finished(vector<instruction> instructions)
-    {
-        for (int i = 0; i < instructions.size(); i++)
-        {
-            if (instructions[i].write_back_cycle == INT_MIN)
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    // destructors
-    ~reservation_stations()
-    {
-        adders.clear();
-        multipliers.clear();
-        loader.clear();
-        stores.clear();
-        nanders.clear();
-    }
-};
-
-/////////////////////////////////////////load store buffers/////////////////////////////////////////
-
-// Buffers
-struct LoadStoreBuffer
-{
-    string name;
-    string address;
-    bool isBusy;
-    instruction *instr;
-    string fu;
-
-    LoadStoreBuffer() : isBusy(false), instr(nullptr) {} // Constructor
-};
-
-struct LoadStoreBufferType
-{
-    static const string LOAD;
-    static const string STORE;
-};
-
-const string LoadStoreBufferType::LOAD = "LOAD";
-const string LoadStoreBufferType::STORE = "STORE";
-
-class buffers
-{
-private:
-    LoadStoreBuffer *Load_ReservationStations;
-    LoadStoreBuffer *Store_ReservationStations;
-    int totalLoad_ReservationStations;
-    int totalStore_ReservationStations;
-
-public:
-    buffers(int loadStations, int storeStations)
-        : totalLoad_ReservationStations(loadStations),
-          totalStore_ReservationStations(storeStations)
-    {
-        Load_ReservationStations = new LoadStoreBuffer[totalLoad_ReservationStations];
-        for (int i = 0; i < totalLoad_ReservationStations; i++)
-        {
-            Load_ReservationStations[i].name = "LOAD" + to_string(i);
-        }
-
-        Store_ReservationStations = new LoadStoreBuffer[totalStore_ReservationStations];
-        for (int i = 0; i < totalStore_ReservationStations; i++)
-        {
-            Store_ReservationStations[i].name = "STORE" + to_string(i);
-        }
-    }
-
-    ~buffers()
-    {
-        delete[] Load_ReservationStations;
-        delete[] Store_ReservationStations;
-    }
-};
-
-/////////////////////////////////////////Tomasulo/////////////////////////////////////////
-
-/////////////////////////////////////////execution/////////////////////////////////////////
-
-/*Note nadia*/
-// i am going to assume that in issuing i am going to have the the instruction be in the reservatoin satation
-// also fill in the gj and the other values needed in the reservation sation that are retrieved from the instruction
-// you should also update the instuction issue status date to be current cycle
-// make sure in the issuing to send the jal and beq to the add reservation station and have a variable or sth to know that it is a branch
-
-void reservation_station::execute()
-{
-
-    // add & addi excecution
-    for (int i = 0; i < res_stations->hardware.adders; i++)
-    {
-
-        // case wher the execution is not started yet
-        if (res_stations->adders[i].inst->execution_start_cycle == INT_MIN)
-        {
-            // check if the reservation station is ready
-            if (res_stations->adders[i].ready())
-            {
-                // update the reservation station
-                res_stations->adders[i].inst->execution_start_cycle = current_cycle;
-                res_stations->adders[i].inst->cycles_left = res_stations->adders[i].cycles;
-            }
-        }
-
-        /*note osswa check if it should be written back at 1 or 0
-         */
-
-        // mark the end of the execution
-        if (res_stations->adders[i].inst->cycles_left == 0)
-        {
-            res_stations->adders[i].inst->excecution_end_cycle = current_cycle;
-        }
-
-        // decrement the cycles left
-        res_stations->adders[i].inst->cycles_left--;
-    }
-
-    // mul excecution
-    for (int i = 0; i < res_stations->hardware.multipliers; i++)
-    {
-        // case wher the execution is not started yet
-        if (res_stations->multipliers[i].inst->execution_start_cycle == INT_MIN)
-        {
-            // check if the reservation station is ready
-            if (res_stations->multipliers[i].ready())
-            {
-                // update the reservation station
-                res_stations->multipliers[i].inst->execution_start_cycle = current_cycle;
-                res_stations->multipliers[i].inst->cycles_left = res_stations->multipliers[i].cycles;
-            }
-        }
-
-        /*note osswa check if it should be written back at 1 or 0
-         */
-        // mark the end of the execution
-        if (res_stations->multipliers[i].inst->cycles_left == 0)
-        {
-            res_stations->multipliers[i].inst->excecution_end_cycle = current_cycle;
-        }
-
-        // decrement the cycles left
-        res_stations->multipliers[i].inst->cycles_left--;
-    }
-
-    // nand excecution
-    for (int i = 0; i < res_stations->hardware.nanders; i++)
-    {
-        // case wher the execution is not started yet
-        if (res_stations->nanders[i].inst->execution_start_cycle == INT_MIN)
-        {
-            // check if the reservation station is ready
-            if (res_stations->nanders[i].ready())
-            {
-                // update the reservation station
-                res_stations->nanders[i].inst->execution_start_cycle = current_cycle;
-                res_stations->nanders[i].inst->cycles_left = res_stations->nanders[i].cycles;
-            }
-        }
-
-        /*note osswa check if it should be written back at 1 or 0
-         */
-        // mark the end of the execution
-        if (res_stations->nanders[i].inst->cycles_left == 0)
-        {
-            res_stations->nanders[i].inst->excecution_end_cycle = current_cycle;
-        }
-
-        // decrement the cycles left
-        res_stations->nanders[i].inst->cycles_left--;
-    }
-
-    // load excecution
-    for (int i = 0; i < res_stations->hardware.loaders; i++)
-    {
-        // case wher the execution is not started yet
-        if (res_stations->loader[i].inst->execution_start_cycle == INT_MIN)
-        {
-            // check if the reservation station is ready
-            if (res_stations->loader[i].ready())
-            {
-                // update the reservation station
-                res_stations->loader[i].inst->execution_start_cycle = current_cycle;
-                res_stations->loader[i].inst->cycles_left = res_stations->loader[i].cycles;
-            }
-        }
-
-        /*note osswa check if it should be written back at 1 or 0
-         */
-        // mark the end of the execution
-        if (res_stations->loader[i].inst->cycles_left == 0)
-        {
-            res_stations->loader[i].inst->excecution_end_cycle = current_cycle;
-        }
-
-        // decrement the cycles left
-        res_stations->loader[i].inst->cycles_left--;
-    }
-
-    // store excecution
-    for (int i = 0; i < res_stations->hardware.stores; i++)
-    {
-        // case wher the execution is not started yet
-        if (res_stations->stores[i].inst->execution_start_cycle == INT_MIN)
-        {
-            // check if the reservation station is ready
-            if (res_stations->stores[i].ready())
-            {
-                // update the reservation station
-                res_stations->stores[i].inst->execution_start_cycle = current_cycle;
-                res_stations->stores[i].inst->cycles_left = res_stations->stores[i].cycles;
-            }
-        }
-
-        /*note osswa check if it should be written back at 1 or 0
-         */
-        // mark the end of the execution
-        if (res_stations->stores[i].inst->cycles_left == 0)
-        {
-            res_stations->stores[i].inst->excecution_end_cycle = current_cycle;
-        }
-
-        // decrement the cycles left
-        res_stations->stores[i].inst->cycles_left--;
-    }
+    //for (int i = 0; i < inst_mem.size(); i++) {
+    //    inst_mem[i].print();
+    //    cout << endl;
+    //}
+    return;
 }
 
-/////////////////////////////////////////flushing/////////////////////////////////////////
 
-void reservation_station::flush()
+////////////////////////////////// ABS //////////////////////////////////////////////////////////////
+void abs_station::issue()
 {
+    //cout << "Instruction " << inst.PC_idx << " has been issued\n";
+    if (!RegisterStat[inst.rs1].empty()) {
+        Qj = RegisterStat[inst.rs1];
+    }
+    else {
+        Vj = Regs[inst.rs1];
+        Qj = "";
+    }
 
-    OP = "";
-    name = "";
-    busy = false;
+    busy = true;
+    inst.issued_cycle = clk;
+    if (branch_issued)
+    {
+        not_allowed = true;
+        after_branch.push_back(this);
+    }
+    RegisterStat[inst.rd] = name;
+
+}
+
+void abs_station::exec()
+{
+    if (inst.exec_rem_cycles == exec_time) {
+        inst.exec_begin_cycle = clk;
+        //cout << "Instruction " << inst.PC_idx << " began executing\n";
+    }
+    if (inst.exec_rem_cycles == 1) {
+        inst.exec_end_cycle = clk;
+        cdb.push_back(this);
+        finished_exec = true;
+        //cout << "Instruction " << inst.PC_idx << " ended executing\n";
+    }
+
+    inst.exec_rem_cycles--;
+}
+
+
+void abs_station::wb()
+{
+    inst.wb_cycle = clk;
+    //cout << "Instruction " << inst.PC_idx << " is writing back\n";
+
+    int result = abs(Vj);
+    rs.update_rs(name, result);
+
+    finished_inst.push_back(inst);
+    flush();
+
+}
+
+void abs_station::flush() {
+
     Qj = "";
-    Qk = "";
-    Vj = -1;
-    Vk = -1;
+    Vj = 0;
+    finished_exec = false;
+    busy = false;
+    not_allowed = false;
+
+}
+
+//////////////////////////////////////////////// ADD //////////////////////////////////////////////////////////////
+void add_station::issue()
+{
+    //cout << "Instruction " << inst.PC_idx << " has been issued\n";
+
+    if (!RegisterStat[inst.rs1].empty())
+    {
+        Qj = RegisterStat[inst.rs1];
+    }
+    else
+    {
+        Vj = Regs[inst.rs1];
+        Qj = "";
+    }
+    if (inst.op == "ADD") {
+        if (!RegisterStat[inst.rs2].empty())
+        {
+            Qk = RegisterStat[inst.rs2];
+        }
+        else
+        {
+            Vk = Regs[inst.rs2];
+            Qk = "";
+        }
+    }
+    A = inst.imm;
+    op = inst.op;
+    inst.issued_cycle = clk;
+    busy = true;
+    RegisterStat[inst.rd] = name;
+    if (branch_issued)
+    {
+        not_allowed = true;
+        after_branch.push_back(this);
+    }
+}
+
+void add_station::exec()
+{
+    if (inst.exec_rem_cycles == exec_time) {
+        inst.exec_begin_cycle = clk;
+        //cout << "Instruction " << inst.PC_idx << " began executing\n";
+    }
+    if (inst.exec_rem_cycles == 1) {
+        inst.exec_end_cycle = clk;
+        cdb.push_back(this);
+        finished_exec = true;
+        //cout << "Instruction " << inst.PC_idx << " ended executing\n";
+
+    }
+
+    inst.exec_rem_cycles--;
+}
+
+void add_station::wb()
+{
+    //cout << "Instruction " << inst.PC_idx << " is writing back\n";
+
+    inst.wb_cycle = clk;
+    if (op == "ADDI")
+    {
+        int result = Vj + A;
+        rs.update_rs(name, result);
+    }
+    else
+    {
+        if (op == "ADD")
+        {
+            int result = Vj + Vk;
+            rs.update_rs(name, result);
+        }
+    }
+
+    finished_inst.push_back(inst);
+    flush();
+}
+
+void add_station::flush() {
     A = 0;
-    inst = nullptr;
+    Qj = "";
+    Vj = 0;
+    Qk = "";
+    Vk = 0;
+    op = "";
+    busy = false;
+    not_allowed = false;
+    finished_exec = false;
 }
 
-/////////////////////////////////////////write back/////////////////////////////////////////
+/////////////////////////////////////////////////////// BEQ /////////////////////////////////////////////////////////////////////
 
-void reservation_station::write_back()
+void beq_station::issue()
 {
+    //cout << "Instruction " << inst.PC_idx << " has been issued\n";
+    inst.issued_cycle = clk;
 
-    // add & addi write back
-    for (int i = 0; i < res_stations->hardware.adders; i++)
+
+    if (!RegisterStat[inst.rs1].empty())
     {
-        // check if the reservation station is ready
-        if (res_stations->adders[i].ready())
+        Qj = RegisterStat[inst.rs1];
+    }
+    else
+    {
+        Vj = Regs[inst.rs1];
+        Qj = "";
+    }
+    if (!RegisterStat[inst.rs2].empty())
+    {
+        Qk = RegisterStat[inst.rs2];
+    }
+    else
+    {
+        Vk = Regs[inst.rs2];
+        Qk = "";
+    }
+
+    A = inst.imm;
+
+    branch_issued = true;
+    RegisterStat_buffer = RegisterStat;
+    busy = true;
+}
+
+void beq_station::exec()
+{
+    if (inst.exec_rem_cycles == exec_time) {
+        inst.exec_begin_cycle = clk;
+        //cout << "Instruction " << inst.PC_idx << " began executing\n";
+    }
+    
+    if (inst.exec_rem_cycles == 1)
+    {
+        inst.exec_end_cycle = clk;
+        finished_exec = true;
+        //cout << "Instruction " << inst.PC_idx << " ended executing\n";
+
+    }
+
+    inst.exec_rem_cycles--;
+}
+
+void beq_station::wb()
+{
+    //cout << "Instruction " << inst.PC_idx << " is writing back\n";
+
+    inst.wb_cycle = clk;
+
+    if (Vk == Vj)
+    {
+        branch();
+        branch_mispredicted++;
+    }
+    else
+    {
+        dont_branch();
+    }
+
+    finished_inst.push_back(inst);
+    flush();
+    total_branches_num++;
+}
+
+void beq_station::flush() {
+    A = 0;
+    Qj = "";
+    Vj = 0;
+    Qk = "";
+    Vk = 0;
+    busy = false;
+    not_allowed = false;
+    finished_exec = false;
+    jump_issued = false;
+}
+void beq_station::branch()
+{
+    for (int i = 0; i < after_branch.size(); i++) {
+        after_branch[i]->flush();
+    }
+    after_branch.clear();
+    branch_issued = false;
+    PC = inst.PC_idx + A + 1;
+    RegisterStat = RegisterStat_buffer;
+}
+
+void beq_station::dont_branch()
+{
+    rs_station* S;
+
+    while (after_branch.size() > 0)
+    {
+        S = after_branch[0];
+        S->not_allowed = false;
+        after_branch.erase(after_branch.begin());
+
+    }
+    branch_issued = false;
+}
+
+//////////////////////////////////////////////////////////// DIV ///////////////////////////////////////////////////////////////////////////////////
+
+void div_station::issue()
+{
+    //cout << "Instruction " << inst.PC_idx << " has been issued\n";
+
+    if (!RegisterStat[inst.rs1].empty())
+    {
+        Qj = RegisterStat[inst.rs1];
+    }
+    else
+    {
+        Vj = Regs[inst.rs1];
+        Qj = "";
+    }
+    if (!RegisterStat[inst.rs2].empty())
+    {
+        Qk = RegisterStat[inst.rs2];
+    }
+    else
+    {
+        Vk = Regs[inst.rs2];
+        Qk = "";
+    }
+
+    inst.issued_cycle = clk;
+    busy = true;
+    RegisterStat[inst.rd] = name;
+    if (branch_issued)
+    {
+        not_allowed = true;
+        after_branch.push_back(this);
+    }
+
+}
+
+
+void div_station::exec()
+{
+    if (inst.exec_rem_cycles == exec_time) {
+        inst.exec_begin_cycle = clk;
+        //cout << "Instruction " << inst.PC_idx << " began executing\n";
+    }
+    
+    if (inst.exec_rem_cycles == 1) {
+        inst.exec_end_cycle = clk;
+        cdb.push_back(this);
+        finished_exec = true;
+        //cout << "Instruction " << inst.PC_idx << " ended executing\n";
+
+    }
+
+    inst.exec_rem_cycles--;
+}
+
+
+void div_station::wb()
+{
+    //cout << "Instruction " << inst.PC_idx << " is writing back\n";
+    int result;
+    inst.wb_cycle = clk;
+    if( Vk == 0)
+    {
+        std::cout<<"\nCan not divide by zero\n";
+        exit(0);
+    }
+    else
+        result = Vj / Vk;
+    rs.update_rs(name, result);
+
+    finished_inst.push_back(inst);
+    flush();
+}
+
+void div_station::flush() {
+
+    Qj = "";
+    Vj = 0;
+    Qk = "";
+    Vk = 0;
+    finished_exec = false;
+    busy = false;
+    not_allowed = false;
+}
+
+////////////////////////////////////////////////////// JAL /////////////////////////////////////////////////////
+
+void jal_station::issue()
+{
+    //cout << "Instruction " << inst.PC_idx << " has been issued\n";
+
+    if(inst.op == "JALR"){
+        if (!RegisterStat[inst.rs1].empty())
         {
-            // update the cycles
-            res_stations->adders[i].inst->write_back_cycle = current_cycle;
+            Qj = RegisterStat[inst.rs1];
+        }
+        else
+        {
+            Vj = Regs[inst.rs1];
+            Qj = "";
+        }
+    }
+    A = inst.imm;
+    op = inst.op;
+    inst.issued_cycle = clk;
+    busy = true;
+    RegisterStat[inst.rd] = name;
+    jump_issued = true;
+    if (branch_issued)
+    {
+        not_allowed = true;
+        after_branch.push_back(this);
+    }
+}
 
-            // check if addi or add
-            if (res_stations->adders[i].inst->OP == "ADD")
-            {
-                res_stations->adders[i].inst->rd = res_stations->adders[i].inst->rs1 + res_stations->adders[i].inst->rs2;
-            }
-            else if (res_stations->adders[i].inst->OP == "ADDI")
-            {
-                res_stations->adders[i].inst->rd = res_stations->adders[i].inst->rs1 + res_stations->adders[i].inst->imm;
-            }
+void jal_station::exec()
+{
+    if (inst.exec_rem_cycles == exec_time) {
+        inst.exec_begin_cycle = clk;
+        //cout << "Instruction " << inst.PC_idx << " began executing\n";
+    }
+    
+    if (inst.exec_rem_cycles == 1) {
+        inst.exec_end_cycle = clk;
+        cdb.push_back(this);
+        finished_exec = true;
+        //cout << "Instruction " << inst.PC_idx << " ended executing\n";
 
-            // push the finished instruction to the finished instructions vector
-            finished_instructions.push_back(*res_stations->adders[i].inst);
+    }
 
-            // flush the instruction
-            res_stations->adders[i].flush();
+    inst.exec_rem_cycles--;
+}
+
+void jal_station::wb()
+{
+    //cout << "Instruction " << inst.PC_idx << " is writing back\n";
+
+    inst.wb_cycle = clk;
+    if (op == "JAL")
+    {
+
+        int result = inst.PC_idx + 1;
+        PC = result + A;
+        rs.update_rs(name, result);
+    }
+    else
+    {
+        if (op == "JALR")
+        {
+            int result = inst.PC_idx + 1;
+            PC = Vj;
+            rs.update_rs(name, result);
         }
     }
 
-    // mul write back
-    for (int i = 0; i < res_stations->hardware.multipliers; i++)
-    {
-        // check if the reservation station is ready
-        if (res_stations->multipliers[i].ready())
-        {
-            // update the cycles
-            res_stations->multipliers[i].inst->write_back_cycle = current_cycle;
+    finished_inst.push_back(inst);
+    flush();
+}
 
-            // update the rd
-            res_stations->multipliers[i].inst->rd = res_stations->multipliers[i].inst->rs1 * res_stations->multipliers[i].inst->rs2;
+void jal_station::flush() {
+    A = 0;
+    Qj = "";
+    Vj = 0;
+    op = "";
+    busy = false;
+    not_allowed = false;
+    finished_exec = false;
+    jump_issued = false;
+}
 
-            // push the finished instruction to the finished instructions vector
-            finished_instructions.push_back(*res_stations->multipliers[i].inst);
+//////////////////////////////////////////////////// LW //////////////////////////////////////////////////////
+void load_station::issue() {
+    //cout << "Instruction " << inst.PC_idx << " has been issued\n";
 
-            // flush the instruction
-            res_stations->multipliers[i].flush();
-        }
+    if (!RegisterStat[inst.rs1].empty()) {
+        Qj = RegisterStat[inst.rs1];
     }
-
-    // nand write back
-    for (int i = 0; i < res_stations->hardware.nanders; i++)
-    {
-        // check if the reservation station is ready
-        if (res_stations->nanders[i].ready())
-        {
-            // update the cycles
-            res_stations->nanders[i].inst->write_back_cycle = current_cycle;
-
-            // update the rd
-            res_stations->nanders[i].inst->rd = ~(res_stations->nanders[i].inst->rs1 & res_stations->nanders[i].inst->rs2);
-
-            // push the finished instruction to the finished instructions vector
-            finished_instructions.push_back(*res_stations->nanders[i].inst);
-
-            // flush the instruction
-            res_stations->nanders[i].flush();
-        }
+    else {
+        Vj = Regs[inst.rs1];
+        Qj = "";
     }
+    A = inst.imm;
+    busy = true;
+    inst.issued_cycle = clk;
 
-    // branch write back
+    load_store_hazard = true;
 
-    for (int i = 0; i < res_stations->hardware.branches; i++)
+    RegisterStat[inst.rd] = name;
+    load_store_queue.push_back(this);
+    if (branch_issued)
     {
-        // check if the reservation station is ready
-        if (res_stations->branches[i].ready())
-        {
-            // update the cycles
-            res_stations->branches[i].inst->write_back_cycle = current_cycle;
-
-            // update the rd only if the condition is true & call the branch function
-            if (res_stations->branches[i].inst->rs1 == res_stations->branches[i].inst->rs2)
-            {
-                branch();
-                branch_misprediction_count++; // increment the branch misprediction count since we have a no branch predictor
-            }
-
-            // push the finished instruction to the finished instructions vector
-            finished_instructions.push_back(*res_stations->branches[i].inst);
-
-            total_branch_count++;
-
-            // flush the instruction
-            res_stations->branches[i].flush();
-        }
+        not_allowed = true;
+        after_branch.push_back(this);
     }
+}
 
-    // load write back
-    for (int i = 0; i < res_stations->hardware.loaders; i++)
-    {
-        // check if the reservation station is ready
-        if (res_stations->loader[i].ready())
-        {
-            // update the cycles
-            res_stations->loader[i].inst->write_back_cycle = current_cycle;
-
-            // note osswa : we might change this
-            res_stations->loader[i].inst->rd = res_stations->loader[i].inst->rs1 + res_stations->loader[i].inst->imm;
-
-            // push the finished instruction to the finished instructions vector
-            finished_instructions.push_back(*res_stations->loader[i].inst);
-
-            // flush the instruction
-            res_stations->loader[i].flush();
+void load_station::exec() {
+    if (!load_store_hazard) {
+        if (inst.exec_rem_cycles == exec_time) {
+            inst.exec_begin_cycle = clk;
+            //cout << "Instruction " << inst.PC_idx << " began executing\n";
         }
-    }
-
-    // store write back
-    for (int i = 0; i < res_stations->hardware.stores; i++)
-    {
-        // check if the reservation station is ready
-        if (res_stations->stores[i].ready())
-        {
-            // update the cycles
-            res_stations->stores[i].inst->write_back_cycle = current_cycle;
-
-            // note osswa : we might change this
-            res_stations->stores[i].inst->rd = res_stations->stores[i].inst->rs1 + res_stations->stores[i].inst->imm;
-
-            // push the finished instruction to the finished instructions vector
-            finished_instructions.push_back(*res_stations->stores[i].inst);
-
-            // flush the instruction
-            res_stations->stores[i].flush();
+        if(inst.exec_rem_cycles == read_mem+1){
+            load_store_queue.erase(load_store_queue.begin());
         }
+        if (inst.exec_rem_cycles == read_mem) {
+            A = A + Vj;
+            addr_calculated = true;
+            check_store();
+        }
+        if (inst.exec_rem_cycles == 1) {
+            inst.exec_end_cycle = clk;
+            cdb.push_back(this);
+            finished_exec = true;
+            //cout << "Instruction " << inst.PC_idx << " ended executing\n";
+
+        }
+
+        inst.exec_rem_cycles--;
     }
-
-    // call & ret write back
-    for (int i = 0; i < res_stations->hardware.call_ret; i++)
-    {
-        // check if the reservation station is ready
-        if (res_stations->call_ret[i].ready())
-        {
-            // check if call or ret; if call calculate the new pc if ret return to the value stored in r1 in the register file
-            if (res_stations->call_ret[i].inst->OP == "CALL")
-            {
-                // update the cycles
-                res_stations->call_ret[i].inst->write_back_cycle = current_cycle;
-
-                // update the rd
-                res_stations->call_ret[i].inst->rd = PC + 1;
-
-                // push the finished instruction to the finished instructions vector
-                finished_instructions.push_back(*res_stations->call_ret[i].inst);
-
-                // flush the instruction
-                res_stations->call_ret[i].flush();
-            }
-            else if (res_stations->call_ret[i].inst->OP == "RET")
-            {
-                // update the cycles
-                res_stations->call_ret[i].inst->write_back_cycle = current_cycle;
-
-                // update the rd
-                res_stations->call_ret[i].inst->rd = registers[1].first;
-
-                // push the finished instruction to the finished instructions vector
-                finished_instructions.push_back(*res_stations->call_ret[i].inst);
-
-                // flush the instruction
-                res_stations->call_ret[i].flush();
-            }
+    else if (addr_calculated) {
+        if (store_waiting_for->busy == false) {
+            load_store_hazard = false;
+            store_waiting_for = NULL;
         }
     }
 }
 
-/////////////////////////////////////////branching/////////////////////////////////////////
+void load_station::wb() {
+    //cout << "Instruction " << inst.PC_idx << " is writing back\n";
 
-void reservation_station::branch()
-{
+    inst.wb_cycle = clk;
 
-    for (int i = 0; i < after_branch_record.size(); i++)
-    {
-        if (after_branch_record[i].inst->after_branch)
-        {
-            // flush the reservation station
-            after_branch_record[i].flush();
-        }
-    }
-    // empty the after branch record
-    after_branch_record.clear();
+    rs.update_rs(name, Mem[A]);
 
-    // set PC to the new value
-    PC = PC + A + 1;
+    finished_inst.push_back(inst);
+    flush();
 }
 
-/////////////////////////////////////////no branch/////////////////////////////////////////
-// we might beed this
+void load_station::flush() {
+    A = 0;
+    Qj = "";
+    Vj = 0;
+    busy = false;
+    not_allowed = false;
+    load_store_hazard = false;
+    finished_exec = false;
+}
 
-/////////////////////////////////////////ready function/////////////////////////////////////////
+void load_station::check_store() {
+    store_waiting_for = NULL;
+    for (int i = 0; i < rs.rs_sw.size(); i++)
+    {
+        if (rs.rs_sw[i].busy && rs.rs_sw[i].addr_calculated && A == rs.rs_sw[i].A) {
+            load_store_hazard = true;
+            if (store_waiting_for == NULL) store_waiting_for = &rs.rs_sw[i];
+            else {
+                if (store_waiting_for->inst.issued_cycle < rs.rs_sw[i].inst.issued_cycle) store_waiting_for = &rs.rs_sw[i];
+            }
+        }
+    }
 
-// this function checks if the instructions is ready to be pushed back of not
-/*note osswa : might need some tweaking for the laod and store write */
+}
 
-bool reservation_station::ready()
+
+///////////////////////////////////////////////////////////////// NEG ///////////////////////////////////////////////////////////////
+void neg_station::issue()
 {
-    // check if the reservation station is busy
-    if (busy)
-    {
-        return false;
+    //cout << "Instruction " << inst.PC_idx << " has been issued\n";
+
+    if (!RegisterStat[inst.rs1].empty()) {
+        Qj = RegisterStat[inst.rs1];
+    }
+    else {
+        Vj = Regs[inst.rs1];
+        Qj = "";
     }
 
-    // check if the reservation station is ready
-    if (Qj == "" && Qk == "")
+    busy = true;
+    inst.issued_cycle = clk;
+
+    RegisterStat[inst.rd] = name;
+    if (branch_issued)
     {
-        return true;
+        not_allowed = true;
+        after_branch.push_back(this);
+    }
+}
+
+void neg_station::exec()
+{
+    if (inst.exec_rem_cycles == exec_time) {
+        inst.exec_begin_cycle = clk;
+        //cout << "Instruction " << inst.PC_idx << " began executing\n";
+    }
+    if (inst.exec_rem_cycles == 1) {
+        inst.exec_end_cycle = clk;
+        cdb.push_back(this);
+        finished_exec = true;
+        //cout << "Instruction " << inst.PC_idx << " ended executing\n";
+
     }
 
-    return false;
+    inst.exec_rem_cycles--;
+}
+
+
+void neg_station::wb()
+{
+    //cout << "Instruction " << inst.PC_idx << " is writing back\n";
+
+    inst.wb_cycle = clk;
+
+    int result = -Vj;
+    rs.update_rs(name, result);
+
+    finished_inst.push_back(inst);
+    flush();
+}
+
+void neg_station::flush() {
+
+    Qj = "";
+    Vj = 0;
+    finished_exec = false;
+    busy = false;
+    not_allowed = false;
+}
+
+///////////////////////////////////////////////// SW ////////////////////////////////////////////////////
+void store_station::issue() {
+    //cout << "Instruction " << inst.PC_idx << " has been issued\n";
+
+    if (!RegisterStat[inst.rs1].empty()) {
+        Qj = RegisterStat[inst.rs1];
+    }
+    else {
+        Vj = Regs[inst.rs1];
+        Qj = "";
+    }
+
+    if (!RegisterStat[inst.rs2].empty()) {
+        Qk = RegisterStat[inst.rs2];
+    }
+    else {
+        Vk = Regs[inst.rs1];
+        Qk = "";
+    }
+
+    A = inst.imm;
+    busy = true;
+    inst.issued_cycle = clk;
+
+    load_store_hazard = true;
+    load_store_queue.push_back(this);
+
+    if (branch_issued)
+    {
+        not_allowed = true;
+        after_branch.push_back(this);
+    }
+}
+
+void store_station::exec() {
+    if (!load_store_hazard) {
+        if (inst.exec_rem_cycles == addr_calc) {
+            inst.exec_begin_cycle = clk;
+            //cout << "Instruction " << inst.PC_idx << " began executing\n";
+        }
+        if (inst.exec_rem_cycles == 1) {
+            A = A + Vj;
+            addr_calculated = true;
+            load_store_queue.erase(load_store_queue.begin());
+            check_load_store();
+
+            inst.exec_end_cycle = clk;
+            finished_exec = true;
+
+            rem_write_mem = write_mem;
+        }
+
+        inst.exec_rem_cycles--;
+    }
+}
+
+
+void store_station::wb() {
+    if(load_store_waiting_for == NULL || load_store_waiting_for->busy == false){
+        load_store_waiting_for = NULL;
+        if(rem_write_mem == 1){
+            inst.wb_cycle = clk;
+            Mem[A] = Vk;
+
+            finished_inst.push_back(inst);
+            flush();
+        }
+        else rem_write_mem--;
+    }
+}
+
+void store_station::flush() {
+    A = 0;
+    Qj = "";
+    Vj = 0;
+    Qk = "";
+    Vk = 0;
+    busy = false;
+    not_allowed = false;
+    load_store_hazard = false;
+    finished_exec = false;
+}
+
+
+void store_station::check_load_store() {
+    load_store_waiting_for = NULL;
+    for (int i = 0; i < rs.rs_sw.size(); i++)
+    {
+        if (rs.rs_sw[i].busy && rs.rs_sw[i].addr_calculated && A == rs.rs_sw[i].A && rs.rs_sw[i].inst.PC_idx != inst.PC_idx) {
+            load_store_hazard = true;
+            if (load_store_waiting_for == NULL) load_store_waiting_for = &rs.rs_sw[i];
+            else {
+                if (load_store_waiting_for->inst.PC_idx < rs.rs_sw[i].inst.PC_idx) load_store_waiting_for = &rs.rs_sw[i];
+            }
+        }
+    }
+    for (int i = 0; i < rs.rs_lw.size(); i++)
+    {
+        if (rs.rs_lw[i].busy && rs.rs_lw[i].addr_calculated && A == rs.rs_lw[i].A) {
+            load_store_hazard = true;
+            if (load_store_waiting_for == NULL) load_store_waiting_for = &rs.rs_lw[i];
+            else {
+                if (load_store_waiting_for->inst.PC_idx < rs.rs_lw[i].inst.PC_idx) load_store_waiting_for = &rs.rs_lw[i];
+            }
+        }
+    }
+
+}
+
+/// <summary>
+/// /////////////////////////// RS /////////////////////////////////////////////////////////
+
+void reservation_stations::init(int lw, int lw_addr_calc, int lw_read_mem, int sw, int sw_addr_calc, int sw_write_mem,
+    int beq, int beq_exec, int jal, int jal_exec, int add, int add_exec, int neg, int neg_exec,
+    int abs, int abs_exec, int div, int div_exec)
+{
+    rs_lw.resize(lw);
+    rs_sw.resize(sw);
+    rs_beq.resize(beq);
+    rs_jal.resize(jal);
+    rs_add.resize(add);
+    rs_neg.resize(neg);
+    rs_abs.resize(abs);
+    rs_div.resize(div);
+
+    for (int i = 0; i < rs_lw.size(); i++)
+    {
+        rs_lw[i].exec_time = lw_addr_calc + lw_read_mem;
+        rs_lw[i].addr_calc = lw_addr_calc;
+        rs_lw[i].read_mem = lw_read_mem;
+        if (rs_lw.size() == 1)
+            rs_lw[i].name = "load";
+        else
+            rs_lw[i].name = "load" + to_string(i + 1);
+    }
+
+    for (int i = 0; i < rs_sw.size(); i++)
+    {
+        rs_sw[i].addr_calc = sw_addr_calc;
+        rs_sw[i].write_mem = sw_write_mem;
+        if (rs_sw.size() == 1)
+            rs_sw[i].name = "store";
+        else
+            rs_sw[i].name = "store" + to_string(i + 1);
+    }
+
+    for (int i = 0; i < rs_beq.size(); i++)
+    {
+        rs_beq[i].exec_time = beq_exec;
+        if (rs_beq.size() == 1)
+            rs_beq[i].name = "branch";
+        else
+            rs_beq[i].name = "branch" + to_string(i + 1);
+    }
+
+    for (int i = 0; i < rs_jal.size(); i++)
+    {
+        rs_jal[i].exec_time = jal_exec;
+        if (rs_jal.size() == 1)
+            rs_jal[i].name = "jal";
+        else
+            rs_jal[i].name = "jal" + to_string(i + 1);
+    }
+
+    for (int i = 0; i < rs_add.size(); i++)
+    {
+        rs_add[i].exec_time = add_exec;
+        if (rs_add.size() == 1)
+            rs_add[i].name = "add";
+        else
+            rs_add[i].name = "add" + to_string(i + 1);
+    }
+
+    for (int i = 0; i < rs_neg.size(); i++)
+    {
+        rs_neg[i].exec_time = neg_exec;
+        if (rs_neg.size() == 1)
+            rs_neg[i].name = "negate";
+        else
+            rs_neg[i].name = "negate" + to_string(i + 1);
+    }
+
+    for (int i = 0; i < rs_abs.size(); i++)
+    {
+        rs_abs[i].exec_time = abs_exec;
+        if (rs_abs.size() == 1)
+            rs_abs[i].name = "absolute";
+        else
+            rs_abs[i].name = "absolute" + to_string(i + 1);
+    }
+
+    for (int i = 0; i < rs_div.size(); i++)
+    {
+        rs_div[i].exec_time = div_exec;
+        if (rs_div.size() == 1)
+            rs_div[i].name = "divide";
+        else
+            rs_div[i].name = "divide" + to_string(i + 1);
+    }
+}
+
+void reservation_stations::update_rs(string r, int result)
+{
+    //Updating RegisterStat
+    for (int i = 1; i < RegisterStat.size(); i++) { // We start looping from 1 because we can't write to R0
+        if (RegisterStat[i] == r) {
+            Regs[i] = result;
+            RegisterStat[i] = "";
+        }
+    }
+
+    // Update RS
+    for (int i = 0; i < rs_lw.size(); i++)
+    {
+        if (rs_lw[i].Qj == r) {
+            rs_lw[i].Vj = result;
+            rs_lw[i].Qj = "";
+        }
+    }
+
+    for (int i = 0; i < rs_sw.size(); i++)
+    {
+        if (rs_sw[i].Qj == r) {
+            rs_sw[i].Vj = result;
+            rs_sw[i].Qj = "";
+        }
+        if (rs_sw[i].Qk == r) {
+            rs_sw[i].Vk = result;
+            rs_sw[i].Qk = "";
+        }
+    }
+
+    for (int i = 0; i < rs_beq.size(); i++)
+    {
+        if (rs_beq[i].Qj == r) {
+            rs_beq[i].Vj = result;
+            rs_beq[i].Qj = "";
+        }
+        if (rs_beq[i].Qk == r) {
+            rs_beq[i].Vk = result;
+            rs_beq[i].Qk = "";
+        }
+    }
+
+    for (int i = 0; i < rs_jal.size(); i++)
+    {
+        if (rs_jal[i].Qj == r) {
+            rs_jal[i].Vj = result;
+            rs_jal[i].Qj = "";
+        }
+    }
+
+    for (int i = 0; i < rs_add.size(); i++)
+    {
+        if (rs_add[i].Qj == r) {
+            rs_add[i].Vj = result;
+            rs_add[i].Qj = "";
+        }
+        if (rs_add[i].Qk == r) {
+            rs_add[i].Vk = result;
+            rs_add[i].Qk = "";
+        }
+    }
+
+    for (int i = 0; i < rs_neg.size(); i++)
+    {
+        if (rs_neg[i].Qj == r) {
+            rs_neg[i].Vj = result;
+            rs_neg[i].Qj = "";
+        }
+    }
+
+    for (int i = 0; i < rs_abs.size(); i++)
+    {
+        if (rs_abs[i].Qj == r) {
+            rs_abs[i].Vj = result;
+            rs_abs[i].Qj = "";
+        }
+    }
+
+    for (int i = 0; i < rs_div.size(); i++)
+    {
+        if (rs_div[i].Qj == r) {
+            rs_div[i].Vj = result;
+            rs_div[i].Qj = "";
+        }
+
+        if (rs_div[i].Qk == r) {
+            rs_div[i].Vk = result;
+            rs_div[i].Qk = "";
+        }
+    }
+}
+
+bool reservation_stations::done() {
+
+    for (int i = 0; i < rs_lw.size(); i++)
+    {
+        if (rs_lw[i].busy)
+            return false;
+    }
+
+    for (int i = 0; i < rs_sw.size(); i++)
+    {
+        if (rs_sw[i].busy)
+            return false;
+    }
+
+    for (int i = 0; i < rs_beq.size(); i++)
+    {
+        if (rs_beq[i].busy)
+            return false;
+    }
+
+    for (int i = 0; i < rs_jal.size(); i++)
+    {
+        if (rs_jal[i].busy)
+            return false;
+    }
+
+    for (int i = 0; i < rs_add.size(); i++)
+    {
+        if (rs_add[i].busy)
+            return false;
+    }
+
+    for (int i = 0; i < rs_neg.size(); i++)
+    {
+        if (rs_neg[i].busy)
+            return false;
+    }
+
+    for (int i = 0; i < rs_abs.size(); i++)
+    {
+        if (rs_abs[i].busy)
+            return false;
+    }
+
+    for (int i = 0; i < rs_div.size(); i++)
+    {
+        if (rs_div[i].busy)
+            return false;
+    }
+    return true;
+}
+
+void reservation_stations::issue_load() {
+    for (int i = 0; i < rs_lw.size(); i++) {
+        if (!rs_lw[i].busy) {
+            rs_lw[i].inst = inst_mem[PC];
+            PC++;
+            rs_lw[i].issue();
+            break;
+        }
+    }
+}
+
+void reservation_stations::issue_store() {
+    for (int i = 0; i < rs_sw.size(); i++) {
+        if (!rs_sw[i].busy) {
+            rs_sw[i].inst = inst_mem[PC];
+            PC++;
+            rs_sw[i].issue();
+            break;
+        }
+    }
+}
+
+void reservation_stations::issue_add()
+{
+    for (int i = 0; i < rs_add.size(); i++)
+    {
+        if (!rs_add[i].busy)
+        {
+            rs_add[i].inst = inst_mem[PC];
+            PC++;
+
+            rs_add[i].issue();
+            break;
+        }
+    }
+}
+
+void reservation_stations::issue_beq()
+{
+    for (int i = 0; i < rs_beq.size(); i++)
+    {
+        if (!rs_beq[i].busy)
+        {
+            rs_beq[i].inst = inst_mem[PC];
+            PC++;
+
+            rs_beq[i].issue();
+            break;
+        }
+    }
+}
+
+void reservation_stations::issue_jal()
+{
+    for (int i = 0; i < rs_jal.size(); i++)
+    {
+        if (!rs_jal[i].busy)
+        {
+            rs_jal[i].inst = inst_mem[PC];
+            PC++;
+
+            rs_jal[i].issue();
+            break;
+        }
+    }
+}
+
+void reservation_stations::issue_neg()
+{
+    for (int i = 0; i < rs_neg.size(); i++)
+    {
+        if (!rs_neg[i].busy)
+        {
+            rs_neg[i].inst = inst_mem[PC];
+            PC++;
+
+            rs_neg[i].issue();
+            break;
+        }
+    }
+}
+
+void reservation_stations::issue_div()
+{
+    for (int i = 0; i < rs_div.size(); i++)
+    {
+        if (!rs_div[i].busy)
+        {
+            rs_div[i].inst = inst_mem[PC];
+            PC++;
+
+            rs_div[i].issue();
+            break;
+        }
+    }
+}
+
+void reservation_stations::issue_abs()
+{
+    for (int i = 0; i < rs_abs.size(); i++)
+    {
+        if (!rs_abs[i].busy)
+        {
+            rs_abs[i].inst = inst_mem[PC];
+            PC++;
+
+            rs_abs[i].issue();
+            break;
+        }
+    }
+}
+
+void reservation_stations::wb_store() {
+    for (int i = 0; i < rs_sw.size(); i++) // SW Execution
+    {
+        if (rs_sw[i].busy == true && rs_sw[i].finished_exec && rs_sw[i].can_wb())
+        {
+            rs_sw[i].wb();
+        }
+    }
+}
+
+void reservation_stations::wb_beq() {
+    for (int i = 0; i < rs_beq.size(); i++) // SW Execution
+    {
+        if (rs_beq[i].busy == true && rs_beq[i].finished_exec)
+        {
+            rs_beq[i].wb();
+        }
+    }
+}
+
+void reservation_stations::execute() {
+    //Execution for LW & SW
+    if (!load_store_queue.empty()) 
+    {
+        rs_station* load_store_head = load_store_queue.front();
+        if (load_store_head->can_exec()) 
+        {
+            load_store_head->load_store_hazard = false;
+        }
+    }
+
+    for (int i = 0; i < rs_lw.size(); i++) // LW Execution
+    {
+        if (rs_lw[i].busy == true && rs_lw[i].can_exec() && !rs_lw[i].finished_exec)
+        {
+            rs_lw[i].exec();
+        }
+    }
+    for (int i = 0; i < rs_sw.size(); i++) // SW Execution
+    {
+        if (rs_sw[i].busy == true && rs_sw[i].can_exec() && !rs_sw[i].finished_exec)
+        {
+            rs_sw[i].exec();
+        }
+    }
+
+    //Executing Arithmetic Operations
+    for (int i = 0; i < rs_add.size(); i++) // ADD/ADDI Execution
+    {
+        if (rs_add[i].busy == true && rs_add[i].can_exec() && !rs_add[i].finished_exec)
+        {
+            rs_add[i].exec();
+        }
+    }
+
+    for (int i = 0; i < rs_div.size(); i++) // ADD/ADDI Execution
+    {
+        if (rs_div[i].busy == true && rs_div[i].can_exec() && !rs_div[i].finished_exec)
+        {
+            rs_div[i].exec();
+        }
+    }
+
+    for (int i = 0; i < rs_abs.size(); i++) // ADD/ADDI Execution
+    {
+        if (rs_abs[i].busy == true && rs_abs[i].can_exec() && !rs_abs[i].finished_exec)
+        {
+            rs_abs[i].exec();
+        }
+    }
+
+    for (int i = 0; i < rs_neg.size(); i++) // ADD/ADDI Execution
+    {
+        if (rs_neg[i].busy == true && rs_neg[i].can_exec() && !rs_neg[i].finished_exec)
+        {
+            rs_neg[i].exec();
+        }
+    }
+    for (int i = 0; i < rs_beq.size(); i++) // BEQ Execution
+    {
+        if (rs_beq[i].busy == true && rs_beq[i].can_exec() && !rs_beq[i].finished_exec)
+        {
+            rs_beq[i].exec();
+        }
+    }
+    for (int i = 0; i < rs_jal.size(); i++) // JAL/JALR Execution
+    {
+        if (rs_jal[i].busy == true && rs_jal[i].can_exec() && !rs_jal[i].finished_exec)
+        {
+            rs_jal[i].exec();
+        }
+    }
+    
 }
