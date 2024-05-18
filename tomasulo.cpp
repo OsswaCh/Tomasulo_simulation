@@ -1,229 +1,19 @@
-
-#include <iostream>
-#include <fstream>
-#include <string>
+#include "includes.h"
+#include "structs.h"
+#include "parser.h"
 #include <vector>
-#include <queue>
-#include <algorithm>
-#include <climits>
-// #include "tomasulo.h"
-// #include "global.h"
-using namespace std;
+
 
 ////////////////////////////////////////////////////////
 
-/////////////////////////////////////////Hardware input/////////////////////////////////////////
-struct hardware_input
-{
-
-    // default sizes of the reservation stations
-    int adders = 4;
-    int multipliers = 2;
-    int loaders = 2;
-    int stores = 1;
-    int branches = 1;
-    int nanders = 2;
-    int call_ret = 1;
-
-    // default number of cycles
-    int load_read_cycles = 4;
-    int load_compute_address_cycles = 2;
-
-    int store_write_cycles = 4;
-    int store_compute_address_cycles = 2;
-
-    int branch_cycles = 1;
-    int call_ret_cycles = 1;
-    int add_cycles = 2;
-    int mul_cycles = 8;
-    int nand_cycles = 1;
-
-    // we may need these??????
-
-    void user_input()
-    {
-        // hardware input
-        cout << "Enter the number of adders: ";
-        cin >> adders;
-        cout << "Enter the number of multipliers: ";
-        cin >> multipliers;
-        cout << "Enter the number of loaders: ";
-        cin >> loaders;
-        cout << "Enter the number of stores: ";
-        cin >> stores;
-        cout << "Enter the number of nanders: ";
-        cin >> nanders;
-
-        // cycles input
-        cout << "Enter the number of cycles for load instruction to compute the address: ";
-        cin >> load_compute_address_cycles;
-        cout << "Enter the number of cycles for load instruction to read from memory: ";
-        cin >> load_read_cycles;
-        cout << "Enter the number of cycles for store instruction to compute the address: ";
-        cin >> store_compute_address_cycles;
-        cout << "Enter the number of cycles for store instruction to write to memory: ";
-        cin >> store_write_cycles;
-        cout << "Enter the number of cycles for branch: ";
-        cin >> branch_cycles;
-        cout << "Enter the number of cycles for call/ret: ";
-        cin >> call_ret_cycles;
-        cout << "Enter the number of cycles for add: ";
-        cin >> add_cycles;
-        cout << "Enter the number of cycles for mul: ";
-        cin >> mul_cycles;
-        cout << "Enter the number of cycles for nand: ";
-        cin >> nand_cycles;
-    }
-};
-
-/////////////////////////////////////////other classes/////////////////////////////////////////
-// first step
-class instruction
-{
-
-public:
-    // intruction type
-    enum type
-    {
-        NO_OP,
-        ADD,
-        ADDI,
-        NAND,
-        MUL,
-        LOAD,
-        STORE,
-        BEQ,
-        CALL,
-        RET
-    };
-
-    // instruction components
-    instruction::type OP;
-
-    int rs1;
-    int rs2;
-    int rd;
-    int imm;
-
-    // used for the tracking of instruction
-    short issue_cycle;
-    short execution_start_cycle;
-    short excecution_end_cycle;
-    short write_back_cycle;
-
-    short cycle_count_per_instruction;
-    short cycles_left;
-
-    short instruction_status;
-
-    bool finished;
-
-    // after branch
-    bool after_branch = false;
-
-    // constructor
-    instruction(instruction::type operation = NO_OP, int rs1 = 0, int rs2 = 0, int rd = 0, int imm = 0, short cycles = 0, bool after_branch = false) : OP(operation),
-                                                                                                                                                       rs1(rs1), rs2(rs2), rd(rd), imm(imm), cycle_count_per_instruction(cycles), after_branch(after_branch)
-    {
-        issue_cycle = -1;
-        execution_start_cycle = -1;
-        excecution_end_cycle = -1;
-        write_back_cycle = -1;
-        cycles_left = cycles;
-
-        finished = false;
-    }
-
-    // destructor
-    ~instruction() {}
-};
-
-struct CBD
+struct
 {
     string station_name;
     bool is_empty;
-    int reg;
-};
+    int value;
+} cdb;
 
-CBD cdb;
-
-class reservation_station
-{
-
-public:
-    enum TYPES
-    {
-        ADDER,
-        MUL,
-        LOAD,
-        STORE,
-        NAND,
-        CALL_RET,
-        BEQ
-    };
-
-    // functions to be inherited by other classes
-    bool execute_ready();
-    bool wb_ready();
-    // void execute();
-    // void write_back();
-    void flush();
-    // void branch();
-    // void no_branch();
-    // void call_ret();
-
-    // void issue(instruction &inst);  // Issue method
-    // void update();  // Update method
-
-    // components of reservation station
-
-    reservation_station::TYPES OP; // LOAD, STORE, BEQ, CALL, ADD, NAND, MUL
-    string name;
-    string Qj, Qk;
-    int Vj, Vk;
-    int A;
-    int cycles;
-    int compute_address_cycles;
-
-    instruction *inst;
-    int imm;
-    int result;
-
-    // flags for the reservation station to keep track of the instruction
-    bool computed_effective_A;
-    bool busy;              // issues
-    bool started_execution; // execution started but didn't finish
-    bool executed;          // finished execution but didn't write back
-    bool finished;          // wrote back
-
-    // number of reservation stations
-    int size;
-
-    // contructors
-    reservation_station(reservation_station::TYPES OP = ADDER,
-                        string name = "",
-                        bool busy = false,
-                        string Qj = "",
-                        string Qk = "",
-                        int A = 0,
-                        int Vj = -1,
-                        int Vk = -1,
-                        int size = 0,
-                        int cycles = 0,
-                        int compute_address_cycles = 0,
-                        instruction *inst = nullptr) : OP(OP), name(name), busy(busy), Qj(Qj), Qk(Qk), A(A), Vj(Vj), Vk(Vk), size(size), cycles(cycles), inst(inst), imm(0), computed_effective_A(false),
-                                                       compute_address_cycles(compute_address_cycles), result(0),
-                                                       started_execution(false), executed(false), finished(false)
-
-    {
-    }
-
-    // destructor
-    ~reservation_station()
-    {
-        inst = nullptr;
-    }
-};
+unsigned int data_memory[128];
 
 bool reservation_station::execute_ready()
 {
@@ -415,7 +205,7 @@ private:
 
 public:
     // register status array
-    // vector<pair<int, bool>> register_station;
+    vector<pair<int, bool>> register_station;
 
     vector<RegisterItem> register_stat;
 
@@ -468,8 +258,6 @@ RegisterFile regfile;
 // Globals.h
 vector<reservation_station *> storeBuffer;
 vector<reservation_station *> loadBuffer;
-
-unsigned int data_memory[128];
 
 // int PC;
 // int current_cycle;
@@ -663,39 +451,6 @@ bool issue(instruction &inst)
             }
         }
     }
-
-    /*
-    note nadia: I added this but we might need to split it into two functions
-    */
-    // case of call operation
-    else if (inst.OP == instruction::type::CALL || inst.OP == instruction::type::RET)
-    {
-        for (int i = 0; i < res_stations->hardware.call_ret; i++)
-        {
-            if (!res_stations->call_ret[i].busy)
-            {
-                res_stations->call_ret[i].busy = true;
-                res_stations->call_ret[i].inst = &inst;
-
-                if (regfile.register_stat[inst.rs1].Qi != nullptr)
-                    res_stations->call_ret[i].Qj = regfile.register_stat[inst.rs1].Qi->name;
-                else
-                    res_stations->call_ret[i].Vj = regfile.register_stat[inst.rs1].value;
-
-                if (regfile.register_stat[inst.rs2].Qi != nullptr)
-                    res_stations->call_ret[i].Qk = regfile.register_stat[inst.rs2].Qi->name;
-                else
-                    res_stations->call_ret[i].Vk = regfile.register_stat[inst.rs2].value;
-
-                res_stations->call_ret[i].imm = inst.imm;
-                res_stations->call_ret[i].OP = reservation_station::TYPES::CALL_RET;
-                res_stations->call_ret[i].inst->issue_cycle = current_cycle;
-
-                return true;
-            }
-        }
-    }
-
     return false;
 }
 
@@ -940,12 +695,36 @@ void execute()
         }
     }
 }
-
-void reserveCDB(const reservation_station &rs)
+void update()
 {
-    cdb.is_empty = false;
-    cdb.reg = rs.inst->rd;
-    cdb.station_name = rs.name;
+    // loop over every station and update it:
+    /**
+     * first do one loop to find the reservations that reached a wb stage
+     * if the isntruction write back to the regfile, reserve the cdb
+     * else, write to the memory or don't write.
+     *
+     * broadcast the update from the cdb to the stations and the registerstat
+     *
+     * then do another loop to update the reservation stations that are not in the wb stage.
+     *
+     *
+     *
+     */
+
+    write_back();
+    // update reservation stations
+    broadcast_cdb_to_stations();
+
+    // update the register file
+    for (int i = 0; i < regfile.register_stat.size(); i++)
+        if (regfile.register_stat[i].Qi != nullptr && regfile.register_stat[i].Qi->name == cdb.station_name)
+        {
+            regfile.register_stat[i].Qi = nullptr;
+            regfile.register_stat[i].value = cdb.value;
+            break;
+        }
+
+    execute();
 }
 
 void write_back()
@@ -1132,48 +911,26 @@ void write_back()
     }
 }
 
-void update()
+int main()
 {
-    // loop over every station and update it:
-    /**
-     * first do one loop to find the reservations that reached a wb stage
-     * if the isntruction write back to the regfile, reserve the cdb
-     * else, write to the memory or don't write.
-     *
-     * broadcast the update from the cdb to the stations and the registerstat
-     *
-     * then do another loop to update the reservation stations that are not in the wb stage.
-     *
-     *
-     *
-     */
-
-    // first loop
-}
-
-void run()
-{
-    // main logic
 
     // TODO: read data into instructions vector here
+    readInstructions("test.txt", instructions); // main logic
 
+    
+
+
+    return 1;
     while (!program_finished())
     {
 
         current_cycle++;
         instruction inst = instructions[PC];
 
-        bool issued = issue(inst);
-
         update();
 
-        PC++;
+        bool issued = issue(inst);
+        if (issued)
+            PC++;
     }
-}
-
-int main()
-{
-
-    run();
-    return 0;
 }
