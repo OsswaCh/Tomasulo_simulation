@@ -192,7 +192,7 @@ struct CBD
 {
     string station_name;
     bool is_empty;
-    int reg;
+    bool reg;
 };
 
 CBD cdb;
