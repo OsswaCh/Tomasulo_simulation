@@ -1,6 +1,14 @@
-#include "includes.h"
 
+#include <iostream>
+#include <fstream>
+#include <string>
 #include <vector>
+#include <queue>
+#include <algorithm>
+#include <climits>
+// #include "tomasulo.h"
+// #include "global.h"
+using namespace std;
 
 ////////////////////////////////////////////////////////
 
@@ -31,8 +39,6 @@ struct hardware_input
     int nand_cycles = 1;
 
     // we may need these??????
-    int memory;
-    int registers;
 
     void user_input()
     {
@@ -131,6 +137,15 @@ public:
     // destructor
     ~instruction() {}
 };
+
+struct CBD
+{
+    string station_name;
+    bool is_empty;
+    int reg;
+};
+
+CBD cdb;
 
 class reservation_station
 {
@@ -400,7 +415,7 @@ private:
 
 public:
     // register status array
-    vector<pair<int, bool>> register_station;
+    // vector<pair<int, bool>> register_station;
 
     vector<RegisterItem> register_stat;
 
@@ -453,13 +468,6 @@ RegisterFile regfile;
 // Globals.h
 vector<reservation_station *> storeBuffer;
 vector<reservation_station *> loadBuffer;
-
-struct
-{
-    string station_name;
-    bool is_empty;
-    int reg;
-} cdb;
 
 unsigned int data_memory[128];
 
@@ -655,6 +663,39 @@ bool issue(instruction &inst)
             }
         }
     }
+
+    /*
+    note nadia: I added this but we might need to split it into two functions
+    */
+    // case of call operation
+    else if (inst.OP == instruction::type::CALL || inst.OP == instruction::type::RET)
+    {
+        for (int i = 0; i < res_stations->hardware.call_ret; i++)
+        {
+            if (!res_stations->call_ret[i].busy)
+            {
+                res_stations->call_ret[i].busy = true;
+                res_stations->call_ret[i].inst = &inst;
+
+                if (regfile.register_stat[inst.rs1].Qi != nullptr)
+                    res_stations->call_ret[i].Qj = regfile.register_stat[inst.rs1].Qi->name;
+                else
+                    res_stations->call_ret[i].Vj = regfile.register_stat[inst.rs1].value;
+
+                if (regfile.register_stat[inst.rs2].Qi != nullptr)
+                    res_stations->call_ret[i].Qk = regfile.register_stat[inst.rs2].Qi->name;
+                else
+                    res_stations->call_ret[i].Vk = regfile.register_stat[inst.rs2].value;
+
+                res_stations->call_ret[i].imm = inst.imm;
+                res_stations->call_ret[i].OP = reservation_station::TYPES::CALL_RET;
+                res_stations->call_ret[i].inst->issue_cycle = current_cycle;
+
+                return true;
+            }
+        }
+    }
+
     return false;
 }
 
@@ -830,6 +871,74 @@ void execute()
                 res_stations->stores[i].inst->cycles_left--;
         }
     }
+
+    // branch excecution
+    for (int i = 0; i < res_stations->hardware.branches; i++)
+    {
+        if (res_stations->branches[i].executed)
+            continue;
+        // case wher the execution is not started yet
+        if (!res_stations->branches[i].started_execution)
+        {
+            // check if the reservation station is ready
+            if (res_stations->branches[i].execute_ready())
+            {
+                // update the reservation station
+                res_stations->branches[i].started_execution = true;
+                res_stations->branches[i].inst->execution_start_cycle = current_cycle;
+                res_stations->branches[i].inst->cycles_left = res_stations->branches[i].cycles;
+            }
+        }
+
+        else
+        {
+
+            /*note osswa check if it should be written back at 1 or 0
+             */
+            // mark the end of the execution
+            if (res_stations->branches[i].inst->cycles_left == 0)
+            {
+                res_stations->branches[i].inst->excecution_end_cycle = current_cycle;
+                res_stations->branches[i].executed = true;
+            }
+            else // decrement the cycles left
+                res_stations->branches[i].inst->cycles_left--;
+        }
+    }
+
+    // call_ret excecution
+    for (int i = 0; i < res_stations->hardware.call_ret; i++)
+    {
+        if (res_stations->call_ret[i].executed)
+            continue;
+        // case wher the execution is not started yet
+        if (!res_stations->call_ret[i].started_execution)
+        {
+            // check if the reservation station is ready
+            if (res_stations->call_ret[i].execute_ready())
+            {
+                // update the reservation station
+                res_stations->call_ret[i].started_execution = true;
+                res_stations->call_ret[i].inst->execution_start_cycle = current_cycle;
+                res_stations->call_ret[i].inst->cycles_left = res_stations->call_ret[i].cycles;
+            }
+        }
+
+        else
+        {
+
+            /*note osswa check if it should be written back at 1 or 0
+             */
+            // mark the end of the execution
+            if (res_stations->call_ret[i].inst->cycles_left == 0)
+            {
+                res_stations->call_ret[i].inst->excecution_end_cycle = current_cycle;
+                res_stations->call_ret[i].executed = true;
+            }
+            else // decrement the cycles left
+                res_stations->call_ret[i].inst->cycles_left--;
+        }
+    }
 }
 
 void reserveCDB(const reservation_station &rs)
@@ -931,6 +1040,9 @@ void write_back()
 
             // flush the instruction
             res_stations->branches[i].flush();
+
+            // update the PC by adding the immidiate calue to the current PC
+            PC += res_stations->branches[i].imm;
         }
     }
 
@@ -995,6 +1107,9 @@ void write_back()
 
                 // flush the instruction
                 res_stations->call_ret[i].flush();
+
+                // update the PC by changing it t the immidiate value
+                PC = res_stations->call_ret[i].imm;
             }
             else if (res_stations->call_ret[i].inst->OP == instruction::type::RET)
             {
@@ -1002,13 +1117,16 @@ void write_back()
                 res_stations->call_ret[i].inst->write_back_cycle = current_cycle;
 
                 // update the rd
-                // res_stations->call_ret[i].inst->rd = registers[1].first;
+                res_stations->call_ret[i].inst->rd = regfile.register_stat[res_stations->call_ret[i].inst->rs1].value;
 
                 // push the finished instruction to the finished instructions vector
                 finished_instructions.push_back(*res_stations->call_ret[i].inst);
 
                 // flush the instruction
                 res_stations->call_ret[i].flush();
+
+                // update the PC by returning to the value stored in r1 in the register file
+                PC = regfile.register_stat[res_stations->call_ret[i].inst->rs1].value;
             }
         }
     }
@@ -1057,4 +1175,5 @@ int main()
 {
 
     run();
+    return 0;
 }
