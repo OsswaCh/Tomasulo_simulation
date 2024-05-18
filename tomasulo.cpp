@@ -1187,5 +1187,6 @@ int main()
     printCycles();
     writeClockCycles();
     cout<<"Branch misprediction rate: "<<branch_misprediction_count<<endl; 
+    cout<<"total clock cycles: "<<total_clock_cycle_count<<endl;
 
 }
