@@ -188,6 +188,25 @@ struct reservation_stations
     }
 };
 
+struct CBD
+{
+    string station_name;
+    bool is_empty;
+    int reg;
+};
+
+CBD cdb;
+
+void reserveCDB(const reservation_station &rs)
+{
+    cdb.is_empty = false;
+    cdb.reg = rs.inst->rd;
+    cdb.station_name = rs.name;
+}
+
+
+
+
 class RegisterFile
 {
 
